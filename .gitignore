@@ -1,0 +1,7 @@
+node_modules/
+.env
+
+# Original high-res source art - the app only uses the resized copies in public/img/
+chicken logo.jpeg
+chicken big image.jpeg
+files.zip

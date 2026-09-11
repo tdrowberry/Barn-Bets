@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0b3d26">
+<meta name="description" content="Chicken - a push-your-luck dice game for a group in the same room.">
+<title>Chicken</title>
+<link rel="icon" href="/img/logo.jpg">
+<link rel="apple-touch-icon" href="/img/logo.jpg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div id="splash-screen" class="hidden">
+  <img src="/img/splash.jpg" alt="Chicken Out - Risk &amp; Luck Game">
+</div>
+
+<div id="app">
+  <header class="app-header">
+    <h1><img class="logo-icon" src="/img/logo.jpg" alt="">Chicken</h1>
+    <p class="app-tagline">Push your luck</p>
+  </header>
+
+  <section id="screen-landing" class="screen">
+    <button id="btn-host" class="btn-primary">🎉 Host a Game</button>
+    <button id="btn-join" class="btn-secondary">🙋 Join a Game</button>
+  </section>
+
+  <section id="screen-host-setup" class="screen hidden">
+    <h2>Host a Game</h2>
+    <label>Your name
+      <input type="text" id="host-name" maxlength="24" autocomplete="off" placeholder="Your name">
+    </label>
+    <label>Rounds (5–35)
+      <input type="number" id="host-rounds" min="5" max="35" value="10" autocomplete="off">
+    </label>
+    <label>Starting rolls (1–5)
+      <input type="number" id="host-starting-rolls" min="1" max="5" value="3" autocomplete="off">
+    </label>
+    <label>Dice mode
+      <select id="host-dice-mode">
+        <option value="physical">Physical (report your own dice)</option>
+        <option value="virtual">Virtual (app rolls for you)</option>
+      </select>
+    </label>
+    <label class="checkbox-row" id="host-confirm-rolls-row">
+      <input type="checkbox" id="host-confirm-rolls">
+      <span>Require a confirm tap before each roll (off = tapping a number submits it instantly)</span>
+    </label>
+    <p class="error-text hidden" id="host-setup-error"></p>
+    <button id="btn-create-room" class="btn-primary">🎲 Create Room</button>
+    <button class="btn-link" data-back="screen-landing" type="button">‹ Back</button>
+  </section>
+
+  <section id="screen-join" class="screen hidden">
+    <h2>Join a Game</h2>
+    <label>Room code
+      <input type="text" id="join-code" maxlength="4" autocomplete="off" placeholder="ABCD" style="text-transform:uppercase">
+    </label>
+    <label>Your name
+      <input type="text" id="join-name" maxlength="24" autocomplete="off" placeholder="Your name">
+    </label>
+    <p class="error-text hidden" id="join-error"></p>
+    <button id="btn-join-room" class="btn-primary">🚪 Join</button>
+    <button class="btn-link" data-back="screen-landing" type="button">‹ Back</button>
+  </section>
+
+  <section id="screen-lobby" class="screen hidden">
+    <h2>Lobby</h2>
+    <div class="room-code-display">Room code <span class="room-code-badge" id="lobby-room-code">----</span></div>
+    <p class="qr-label">Scan to join</p>
+    <div id="lobby-qr"></div>
+    <div class="join-link-row">
+      <input type="text" id="lobby-join-link" readonly autocomplete="off">
+      <button id="btn-copy-link" class="btn-small" type="button">📋 Copy</button>
+    </div>
+    <div class="settings-chips" id="lobby-settings"></div>
+
+    <h3>Turn order</h3>
+    <p class="hint hidden" id="lobby-host-hint">Drag the handle to reorder. This sets the play order.</p>
+    <ul id="lobby-player-list" class="player-list"></ul>
+
+    <p class="error-text hidden" id="lobby-error"></p>
+    <button id="btn-start-game" class="btn-primary hidden" type="button">🎲 Start Game</button>
+    <p class="hint hidden" id="lobby-waiting-msg">Waiting for the host to start the game…</p>
+  </section>
+
+  <section id="screen-game" class="screen hidden">
+    <div class="game-topbar">
+      <div class="pot-display">
+        <span class="pot-label">Pot</span>
+        <span class="pot-value" id="game-pot">0</span>
+      </div>
+      <div class="round-info" id="game-round-info">Round 1 of 10 · Roll 1</div>
+    </div>
+
+    <p class="phase-banner" id="game-phase-banner">Starting rolls — safe from a bust</p>
+    <p class="roll-toast hidden" id="roll-toast"></p>
+    <h2 class="turn-indicator" id="game-turn-indicator">Waiting…</h2>
+
+    <button id="btn-chicken-out" class="btn-danger hidden" type="button">🐔 Chicken Out</button>
+
+    <div id="game-waiting-panel" class="hidden">
+      <p class="hint" style="text-align:center;">Watching — it's not your turn yet.</p>
+    </div>
+
+    <div id="game-inactive-panel" class="hidden">
+      <p class="hint" style="text-align:center;">You're sitting out this round — hang tight, you'll be back in for the next one.</p>
+    </div>
+
+    <div id="game-physical-panel" class="hidden">
+      <div class="dice-grid" id="dice-grid">
+        <button type="button" class="dice-btn" data-value="2">2</button>
+        <button type="button" class="dice-btn" data-value="3">3</button>
+        <button type="button" class="dice-btn" data-value="4">4</button>
+        <button type="button" class="dice-btn" data-value="5">5</button>
+        <button type="button" class="dice-btn" data-value="6">6</button>
+        <button type="button" class="dice-btn" data-value="7">7</button>
+        <button type="button" class="dice-btn" data-value="8">8</button>
+        <button type="button" class="dice-btn" data-value="9">9</button>
+        <button type="button" class="dice-btn" data-value="10">10</button>
+        <button type="button" class="dice-btn" data-value="11">11</button>
+        <button type="button" class="dice-btn" data-value="12">12</button>
+        <button type="button" class="dice-btn dice-btn-double" id="double-btn" disabled>×2</button>
+      </div>
+      <p class="hint dice-grid-hint" id="dice-grid-hint">Tap ×2 too if your dice matched.</p>
+      <button id="btn-confirm-roll" class="btn-primary" type="button" disabled>Confirm Roll</button>
+    </div>
+
+    <div id="game-virtual-panel" class="hidden">
+      <div class="dice-animation" id="dice-animation">🎲</div>
+      <button id="btn-roll-dice" class="btn-primary" type="button">🎲 Roll Dice</button>
+    </div>
+
+    <h3>Scoreboard</h3>
+    <ul id="game-scoreboard" class="player-list"></ul>
+
+    <button id="btn-new-session" class="btn-primary hidden" type="button">🔄 Start New Session (Same Players)</button>
+    <p class="hint hidden" id="new-session-waiting-msg" style="text-align:center;">Waiting for the host to start a new session…</p>
+
+    <div id="event-log-wrap">
+      <h3>Event Log</h3>
+      <ul id="event-log" class="event-log"></ul>
+    </div>
+
+    <div id="host-controls" class="host-controls hidden">
+      <button id="btn-toggle-host-controls" class="host-controls-toggle" type="button">⚙️ Host Controls</button>
+      <div id="host-controls-panel" class="host-controls-panel hidden">
+        <button id="btn-undo-roll" class="btn-host" type="button">↩️ Undo Last Roll</button>
+
+        <p class="hint">Late players can still join with the same QR code or link — they'll start at zero, active next round.</p>
+        <div class="room-code-display">Room code <span class="room-code-badge" id="host-room-code">----</span></div>
+        <div class="join-link-row">
+          <input type="text" id="host-join-link" readonly autocomplete="off">
+          <button id="btn-host-copy-link" class="btn-small" type="button">📋 Copy</button>
+        </div>
+
+        <h3>Players</h3>
+        <ul id="host-player-list" class="player-list"></ul>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script src="/js/vendor/qrcode.min.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>

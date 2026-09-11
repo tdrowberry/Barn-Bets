@@ -1,0 +1,782 @@
+(function () {
+  const socket = io();
+
+  const state = {
+    roomCode: null,
+    playerId: null,
+    isHost: false,
+    room: null,
+  };
+
+  let hasHandledInitialConnect = false;
+
+  const screens = ['screen-landing', 'screen-host-setup', 'screen-join', 'screen-lobby', 'screen-game'];
+
+  const AVATAR_COLORS = ['#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
+  function avatarColor(id) {
+    let hash = 0;
+    for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+    return AVATAR_COLORS[hash % AVATAR_COLORS.length];
+  }
+
+  const DRAG_HANDLE_SVG = '<svg class="drag-handle" viewBox="0 0 20 20" width="20" height="20" fill="currentColor">'
+    + '<circle cx="6" cy="4" r="1.6"/><circle cx="14" cy="4" r="1.6"/>'
+    + '<circle cx="6" cy="10" r="1.6"/><circle cx="14" cy="10" r="1.6"/>'
+    + '<circle cx="6" cy="16" r="1.6"/><circle cx="14" cy="16" r="1.6"/></svg>';
+
+  const DIE_FACES = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
+  const DOUBLE_ELIGIBLE_SUMS = new Set([2, 4, 6, 8, 10, 12]);
+  let selectedSum = null;
+  let isDoubleSelected = false;
+  let toastTimer = null;
+
+  // Host action lists (players, event log) are rebuilt wholesale on every room:update,
+  // which fires constantly during live play - so a "confirm?" arm state stored only on the
+  // DOM node would get silently wiped mid-confirm by an unrelated broadcast. Tracking it
+  // here instead means every render can re-apply it to the right row.
+  let armedAction = null; // { type: 'kick' | 'reverse', id }
+
+  function isArmed(type, id) {
+    return !!armedAction && armedAction.type === type && armedAction.id === id;
+  }
+
+  function disarm() {
+    if (armedAction) clearTimeout(armedAction.timer);
+    armedAction = null;
+  }
+
+  function arm(type, id, onExpire) {
+    disarm();
+    const timer = setTimeout(() => { armedAction = null; onExpire(); }, 3000);
+    armedAction = { type, id, timer };
+  }
+
+  function el(id) { return document.getElementById(id); }
+
+  function showScreen(id) {
+    screens.forEach((s) => el(s).classList.toggle('hidden', s !== id));
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function saveSession(roomCode, playerId, isHost) {
+    try {
+      sessionStorage.setItem('chicken.session', JSON.stringify({ roomCode, playerId, isHost }));
+    } catch (e) { /* storage unavailable, non-fatal */ }
+  }
+
+  function loadSession() {
+    try {
+      return JSON.parse(sessionStorage.getItem('chicken.session'));
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function clearSession() {
+    try { sessionStorage.removeItem('chicken.session'); } catch (e) { /* ignore */ }
+  }
+
+  // Shows the splash only for a genuine fresh arrival via QR/link - not on a reload or a
+  // dropped-connection reconnect mid-game, since forcing everyone through a 5s splash again
+  // there would just be annoying, not a nice intro.
+  function maybeShowSplash() {
+    const roomFromUrl = new URLSearchParams(location.search).get('room');
+    if (!roomFromUrl) return;
+    const session = loadSession();
+    const isReconnectToSameRoom = session && session.roomCode === roomFromUrl.toUpperCase() && session.playerId;
+    if (isReconnectToSameRoom) return;
+
+    const splash = el('splash-screen');
+    splash.classList.remove('hidden');
+    setTimeout(() => {
+      splash.classList.add('fade-out');
+      setTimeout(() => splash.classList.add('hidden'), 500);
+    }, 5000);
+  }
+  maybeShowSplash();
+
+  function prefillJoin(code) {
+    el('join-code').value = code.toUpperCase();
+    showScreen('screen-join');
+  }
+
+  function maybePrefillFromUrl() {
+    const roomFromUrl = new URLSearchParams(location.search).get('room');
+    if (roomFromUrl) prefillJoin(roomFromUrl);
+  }
+
+  function applyJoinedState(res, isHost) {
+    state.roomCode = res.roomCode;
+    state.playerId = res.playerId;
+    state.isHost = isHost;
+    state.room = res.room;
+    saveSession(res.roomCode, res.playerId, isHost);
+    renderFromRoom();
+  }
+
+  function renderFromRoom() {
+    const room = state.room;
+    if (!room) return;
+    if (room.status === 'lobby') {
+      renderLobby();
+      showScreen('screen-lobby');
+    } else if (room.status === 'active') {
+      renderGame();
+      showScreen('screen-game');
+    } else if (room.status === 'finished') {
+      renderGameFinished();
+      showScreen('screen-game');
+    }
+  }
+
+  function renderLobby() {
+    const room = state.room;
+    el('lobby-room-code').textContent = room.code;
+
+    const joinUrl = `${window.location.origin}/?room=${room.code}`;
+    el('lobby-join-link').value = joinUrl;
+
+    const qrEl = el('lobby-qr');
+    qrEl.innerHTML = '';
+    if (window.QRCode) {
+      new QRCode(qrEl, { text: joinUrl, width: 180, height: 180 });
+    }
+
+    el('lobby-settings').innerHTML =
+      `<span class="chip">🎲 ${room.roundsTotal} rounds</span>` +
+      `<span class="chip">🛡️ ${room.startingRolls} starting roll${room.startingRolls > 1 ? 's' : ''}</span>` +
+      `<span class="chip">${room.diceMode === 'virtual' ? '📱 Virtual dice' : '✋ Physical dice'}</span>`;
+
+    renderPlayerList(room);
+
+    const startBtn = el('btn-start-game');
+    const waitingMsg = el('lobby-waiting-msg');
+    const hostHint = el('lobby-host-hint');
+    if (state.isHost) {
+      startBtn.classList.remove('hidden');
+      waitingMsg.classList.add('hidden');
+      hostHint.classList.remove('hidden');
+    } else {
+      startBtn.classList.add('hidden');
+      waitingMsg.classList.remove('hidden');
+      hostHint.classList.add('hidden');
+    }
+  }
+
+  function renderPlayerList(room) {
+    const ul = el('lobby-player-list');
+    ul.innerHTML = '';
+    room.players.forEach((p) => {
+      const li = document.createElement('li');
+      li.className = 'player-row';
+      li.dataset.id = p.id;
+      const initial = escapeHtml((p.name.charAt(0) || '?').toUpperCase());
+      li.innerHTML =
+        (state.isHost ? DRAG_HANDLE_SVG : '') +
+        `<span class="player-avatar" style="background:${avatarColor(p.id)}">${initial}</span>` +
+        `<span class="player-name">${escapeHtml(p.name)}${p.isHost ? ' <span class="host-tag">Host</span>' : ''}</span>` +
+        `<span class="conn-dot ${p.connected ? 'online' : 'offline'}"></span>`;
+      ul.appendChild(li);
+    });
+  }
+
+  function showToast(message, isError) {
+    const toast = el('roll-toast');
+    toast.textContent = message;
+    toast.classList.toggle('error', !!isError);
+    toast.classList.remove('hidden');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.add('hidden'), 2600);
+  }
+
+  function isInStartingPhase(room) {
+    return room.rollCountThisRound < room.startingRolls;
+  }
+
+  // Turns one event into plain English, from `viewerId`'s point of view ("You" vs a name).
+  // Shared by the personal action toast and the live event log so the wording matches.
+  function describeEvent(event, room, viewerId) {
+    const player = room.players.find((p) => p.id === event.playerId);
+    const name = viewerId && event.playerId === viewerId ? 'You' : (player ? player.name : 'Someone');
+    switch (event.type) {
+      case 'roll': {
+        const p = event.payload;
+        if (p.busted) return null; // the paired 'bust' event covers this instead
+        if (p.potDoubled) return `🎲 ${name} rolled ${p.sum} (double!) — pot doubled to ${p.potAfter}.`;
+        if (p.inStartingPhase && p.sum === 7) return `🎲 ${name} rolled a 7 — +70 to the pot!`;
+        return `🎲 ${name} rolled ${p.sum}${p.isDouble ? ' (double)' : ''} — pot now ${p.potAfter}.`;
+      }
+      case 'bust':
+        return `💥 ${name} rolled a 7 — bust! Pot lost.`;
+      case 'chickenOut':
+        return `🐔 ${name} chickened out with ${event.payload.potWon} point${event.payload.potWon === 1 ? '' : 's'}!`;
+      case 'chickenOutRejected':
+        return `⏱️ ${name} tried to chicken out, but the round had already ended — too late.`;
+      case 'roundEnd':
+        return `🏁 Everyone chickened out — round over.`;
+      case 'hostOverride': {
+        const a = event.payload;
+        if (a.action === 'undoRoll') return `↩️ Host undid a roll (${a.sum}).`;
+        if (a.action === 'reverseChickenOut') {
+          const targetName = describeName(room, a.targetPlayerId, viewerId);
+          const plural = a.amount === 1 ? '' : 's';
+          if (a.direction === 'toAccepted') {
+            return `↩️ Host reversed a rejected chicken-out — ${targetName} got ${a.amount} point${plural}.`;
+          }
+          const possessive = a.targetPlayerId === viewerId ? 'your' : `${targetName}'s`;
+          return `↩️ Host reversed ${possessive} chicken-out — ${a.amount} point${plural} taken back.`;
+        }
+        return null;
+      }
+      case 'remove':
+        return `🚪 ${event.payload.name} was removed from the game.`;
+      default:
+        return null;
+    }
+  }
+
+  function describeName(room, playerId, viewerId) {
+    if (playerId === viewerId) return 'you';
+    const p = room.players.find((pl) => pl.id === playerId);
+    return p ? p.name : 'that player';
+  }
+
+  function showEventToast(room) {
+    const last = room.events[room.events.length - 1];
+    if (!last) return;
+    const msg = describeEvent(last, room, state.playerId);
+    if (msg) showToast(msg, false);
+  }
+
+  function renderEventLog(room) {
+    const ul = el('event-log');
+    ul.innerHTML = '';
+    const LOGGED_TYPES = new Set(['roll', 'bust', 'chickenOut', 'chickenOutRejected', 'roundEnd', 'remove', 'hostOverride']);
+    const candidates = room.events.filter((e) => LOGGED_TYPES.has(e.type)).slice(-15).reverse();
+    // describeEvent returns null for some matched types (e.g. the startGame hostOverride) -
+    // the empty-state check has to run on what's actually renderable, not the raw type match,
+    // or a room with only silent events shows a blank box instead of the empty-state message.
+    const entries = candidates
+      .map((event) => ({ event, msg: describeEvent(event, room, state.playerId) }))
+      .filter((entry) => entry.msg);
+
+    if (!entries.length) {
+      const li = document.createElement('li');
+      li.className = 'event-log-empty';
+      li.textContent = 'Nothing yet — rolls and chicken-outs will show up here.';
+      ul.appendChild(li);
+      return;
+    }
+
+    entries.forEach(({ event, msg }) => {
+      const li = document.createElement('li');
+      li.className = 'event-log-item' + (event.type === 'chickenOutRejected' ? ' rejected' : '');
+      li.dataset.eventId = event.id;
+      const canReverse = state.isHost
+        && (event.type === 'chickenOut' || event.type === 'chickenOutRejected')
+        && !event.reversed;
+      const armed = isArmed('reverse', event.id);
+      li.innerHTML = `<span class="event-text">${escapeHtml(msg)}</span>`
+        + (canReverse ? `<button type="button" class="btn-reverse${armed ? ' confirming' : ''}">${armed ? 'Confirm?' : '↩ Reverse'}</button>` : '');
+      ul.appendChild(li);
+    });
+  }
+
+  function showRemovedState() {
+    el('game-pot').textContent = '0';
+    el('game-round-info').textContent = '';
+    el('game-phase-banner').classList.add('hidden');
+    const turnEl = el('game-turn-indicator');
+    turnEl.textContent = '🚪 You were removed from this game.';
+    turnEl.classList.remove('my-turn');
+    el('btn-chicken-out').classList.add('hidden');
+    el('game-inactive-panel').classList.add('hidden');
+    el('game-waiting-panel').classList.add('hidden');
+    el('game-physical-panel').classList.add('hidden');
+    el('game-virtual-panel').classList.add('hidden');
+    el('host-controls').classList.add('hidden');
+    el('game-scoreboard').innerHTML = '';
+    el('event-log').innerHTML = '';
+    clearSession();
+  }
+
+  function renderGame() {
+    const room = state.room;
+    const me = room.players.find((p) => p.id === state.playerId);
+    if (!me) { showRemovedState(); return; }
+
+    // Undo the finished-screen's one-way hides, in case this is a new session continuing
+    // in the same page load rather than a fresh navigation.
+    el('event-log-wrap').classList.remove('hidden');
+    el('btn-new-session').classList.add('hidden');
+    el('new-session-waiting-msg').classList.add('hidden');
+
+    el('game-pot').textContent = room.pot;
+    el('game-round-info').textContent = `Round ${room.currentRound} of ${room.roundsTotal} · Roll ${room.rollCountThisRound + 1}`;
+
+    const inStartingPhase = isInStartingPhase(room);
+    const banner = el('game-phase-banner');
+    banner.classList.remove('hidden');
+    banner.textContent = inStartingPhase
+      ? '🛡️ Starting rolls — safe from a bust'
+      : '🔥 Live — a 7 busts the round';
+    banner.classList.toggle('phase-live', !inStartingPhase);
+
+    const turnPlayerId = room.turnOrder[room.turnIndex];
+    const turnPlayer = room.players.find((p) => p.id === turnPlayerId);
+    const amActive = !!(me && me.activeThisRound);
+    const isMyTurn = amActive && turnPlayerId === state.playerId;
+
+    const turnEl = el('game-turn-indicator');
+    turnEl.textContent = isMyTurn ? 'Your turn!' : `${turnPlayer ? turnPlayer.name : '?'}'s turn`;
+    turnEl.classList.toggle('my-turn', isMyTurn);
+
+    el('btn-chicken-out').classList.toggle('hidden', !amActive);
+    el('btn-chicken-out').disabled = false;
+
+    el('game-inactive-panel').classList.toggle('hidden', amActive);
+    el('game-waiting-panel').classList.toggle('hidden', !amActive || isMyTurn);
+    el('game-physical-panel').classList.toggle('hidden', !amActive || !isMyTurn || room.diceMode !== 'physical');
+    el('game-virtual-panel').classList.toggle('hidden', !amActive || !isMyTurn || room.diceMode !== 'virtual');
+
+    if (isMyTurn && room.diceMode === 'physical') {
+      selectedSum = null;
+      isDoubleSelected = false;
+      document.querySelectorAll('.dice-btn').forEach((b) => { b.classList.remove('selected'); b.disabled = false; });
+      const doubleBtn = el('double-btn');
+      // Confirm mode: number picked first, so ×2 stays disabled until a double-eligible
+      // number is selected. Auto-submit mode: the number tap submits immediately, so ×2
+      // (a modifier with no number of its own) must already be toggleable beforehand —
+      // it can only be gated on phase, not on a sum that isn't chosen yet.
+      doubleBtn.disabled = room.confirmRolls ? true : inStartingPhase;
+      el('btn-confirm-roll').classList.toggle('hidden', !room.confirmRolls);
+      el('btn-confirm-roll').disabled = true;
+      el('dice-grid-hint').textContent = inStartingPhase
+        ? "Starting roll — doubles don't affect the pot yet."
+        : (room.confirmRolls ? 'Tap ×2 too if your dice matched, then confirm.' : 'Tap ×2 first if your dice matched, then tap your number to submit.');
+    }
+
+    renderScoreboard(room);
+    renderEventLog(room);
+    renderHostControls(room);
+  }
+
+  function rankMedal(rank) {
+    if (rank === 1) return '🥇';
+    if (rank === 2) return '🥈';
+    if (rank === 3) return '🥉';
+    return `#${rank}`;
+  }
+
+  function renderGameFinished() {
+    const room = state.room;
+    el('game-pot').textContent = '0';
+    el('game-round-info').textContent = `Game complete — ${room.roundsTotal} rounds played`;
+    el('game-phase-banner').classList.add('hidden');
+
+    const sorted = [...room.players].sort((a, b) => b.totalScore - a.totalScore);
+    const topScore = sorted.length ? sorted[0].totalScore : 0;
+    const winners = sorted.filter((p) => p.totalScore === topScore);
+
+    const turnEl = el('game-turn-indicator');
+    turnEl.textContent = winners.length > 1
+      ? `🏆 It's a tie! ${winners.map((w) => w.name).join(' & ')} win with ${topScore}!`
+      : `🏆 ${winners[0] ? winners[0].name : '?'} wins with ${topScore} points!`;
+    turnEl.classList.remove('my-turn');
+
+    el('btn-chicken-out').classList.add('hidden');
+    el('game-inactive-panel').classList.add('hidden');
+    el('game-waiting-panel').classList.add('hidden');
+    el('game-physical-panel').classList.add('hidden');
+    el('game-virtual-panel').classList.add('hidden');
+    el('host-controls').classList.add('hidden');
+    el('event-log-wrap').classList.add('hidden');
+
+    el('btn-new-session').classList.toggle('hidden', !state.isHost);
+    el('new-session-waiting-msg').classList.toggle('hidden', state.isHost);
+
+    renderScoreboard(room);
+  }
+
+  function renderScoreboard(room) {
+    const ul = el('game-scoreboard');
+    ul.innerHTML = '';
+    const isFinal = room.status === 'finished';
+    const sorted = [...room.players].sort((a, b) => b.totalScore - a.totalScore);
+
+    let rank = 0;
+    let lastScore = null;
+    sorted.forEach((p, idx) => {
+      if (p.totalScore !== lastScore) { rank = idx + 1; lastScore = p.totalScore; }
+      const li = document.createElement('li');
+      li.className = 'player-row' + (isFinal && rank === 1 ? ' rank-1' : '');
+      const initial = escapeHtml((p.name.charAt(0) || '?').toUpperCase());
+      const isTurn = room.status === 'active' && room.turnOrder[room.turnIndex] === p.id;
+      const rankBadge = isFinal ? `<span class="rank-badge">${rankMedal(rank)}</span>` : '';
+      li.innerHTML =
+        rankBadge +
+        `<span class="player-avatar" style="background:${avatarColor(p.id)}">${initial}</span>` +
+        `<span class="player-name">${escapeHtml(p.name)}${p.isHost ? ' <span class="host-tag">Host</span>' : ''}${isTurn ? ' <span class="turn-tag">Turn</span>' : ''}</span>` +
+        `<span class="score-value">${p.totalScore}</span>`;
+      ul.appendChild(li);
+    });
+  }
+
+  function renderHostControls(room) {
+    const wrap = el('host-controls');
+    wrap.classList.toggle('hidden', !state.isHost);
+    if (!state.isHost) return;
+
+    const joinUrl = `${window.location.origin}/?room=${room.code}`;
+    el('host-room-code').textContent = room.code;
+    el('host-join-link').value = joinUrl;
+
+    const lastEvent = room.events[room.events.length - 1];
+    const canUndo = lastEvent && (lastEvent.type === 'roll'
+      || (lastEvent.type === 'bust' && room.events[room.events.length - 2] && room.events[room.events.length - 2].type === 'roll'));
+    el('btn-undo-roll').disabled = !canUndo;
+
+    const ul = el('host-player-list');
+    ul.innerHTML = '';
+    room.players.forEach((p) => {
+      const li = document.createElement('li');
+      li.className = 'player-row';
+      li.dataset.id = p.id;
+      const initial = escapeHtml((p.name.charAt(0) || '?').toUpperCase());
+      const armed = isArmed('kick', p.id);
+      li.innerHTML =
+        `<span class="player-avatar" style="background:${avatarColor(p.id)}">${initial}</span>` +
+        `<span class="player-name">${escapeHtml(p.name)}${p.isHost ? ' <span class="host-tag">Host</span>' : ''}</span>` +
+        `<span class="score-value">${p.totalScore}</span>` +
+        (p.isHost ? '' : `<button type="button" class="btn-kick${armed ? ' confirming' : ''}">${armed ? 'Confirm?' : 'Kick'}</button>`);
+      ul.appendChild(li);
+    });
+  }
+
+  function showError(id, message) {
+    const errEl = el(id);
+    errEl.textContent = message;
+    errEl.classList.remove('hidden');
+  }
+
+  function clearError(id) {
+    el(id).classList.add('hidden');
+  }
+
+  // Drag-to-reorder via Pointer Events (covers touch and mouse in one code path).
+  function makeListDraggable(listEl, onReorder) {
+    let dragEl = null;
+
+    function getRows() {
+      return Array.from(listEl.querySelectorAll('.player-row'));
+    }
+
+    function onPointerMove(e) {
+      if (!dragEl) return;
+      const rows = getRows().filter((r) => r !== dragEl);
+      const y = e.clientY;
+      let target = null;
+      for (const row of rows) {
+        const rect = row.getBoundingClientRect();
+        const mid = rect.top + rect.height / 2;
+        if (y < mid) { target = row; break; }
+      }
+      if (target) listEl.insertBefore(dragEl, target);
+      else listEl.appendChild(dragEl);
+    }
+
+    function onPointerUp() {
+      if (!dragEl) return;
+      dragEl.classList.remove('dragging');
+      const finishedEl = dragEl;
+      dragEl = null;
+      document.removeEventListener('pointermove', onPointerMove);
+      document.removeEventListener('pointerup', onPointerUp);
+      const order = getRows().map((r) => r.dataset.id);
+      onReorder(order, finishedEl);
+    }
+
+    listEl.addEventListener('pointerdown', (e) => {
+      const handle = e.target.closest('.drag-handle');
+      if (!handle) return;
+      const row = handle.closest('.player-row');
+      if (!row) return;
+      dragEl = row;
+      dragEl.classList.add('dragging');
+      document.addEventListener('pointermove', onPointerMove);
+      document.addEventListener('pointerup', onPointerUp);
+      e.preventDefault();
+    });
+  }
+
+  // --- Wiring ---
+
+  el('btn-host').addEventListener('click', () => showScreen('screen-host-setup'));
+  el('btn-join').addEventListener('click', () => showScreen('screen-join'));
+  document.querySelectorAll('[data-back]').forEach((btn) => {
+    btn.addEventListener('click', () => showScreen(btn.dataset.back));
+  });
+
+  el('btn-create-room').addEventListener('click', () => {
+    clearError('host-setup-error');
+    const name = el('host-name').value.trim();
+    if (!name) return showError('host-setup-error', 'Enter your name.');
+
+    socket.emit('host:createRoom', {
+      hostName: name,
+      rounds: el('host-rounds').value,
+      startingRolls: el('host-starting-rolls').value,
+      diceMode: el('host-dice-mode').value,
+      confirmRolls: el('host-confirm-rolls').checked,
+    }, (res) => {
+      if (!res || !res.ok) return showError('host-setup-error', (res && res.error) || 'Could not create room.');
+      applyJoinedState(res, true);
+    });
+  });
+
+  function updateConfirmRollsVisibility() {
+    el('host-confirm-rolls-row').classList.toggle('hidden', el('host-dice-mode').value === 'virtual');
+  }
+  el('host-dice-mode').addEventListener('change', updateConfirmRollsVisibility);
+  updateConfirmRollsVisibility();
+
+  el('btn-join-room').addEventListener('click', () => {
+    clearError('join-error');
+    const code = el('join-code').value.trim().toUpperCase();
+    const name = el('join-name').value.trim();
+    if (!code || !name) return showError('join-error', 'Enter the room code and your name.');
+
+    socket.emit('player:joinRoom', { roomCode: code, name }, (res) => {
+      if (!res || !res.ok) return showError('join-error', (res && res.error) || 'Could not join room.');
+      applyJoinedState(res, false);
+    });
+  });
+
+  el('btn-copy-link').addEventListener('click', () => {
+    const input = el('lobby-join-link');
+    input.select();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(input.value).catch(() => {});
+    }
+  });
+
+  el('btn-start-game').addEventListener('click', () => {
+    clearError('lobby-error');
+    socket.emit('host:startGame', {}, (res) => {
+      if (!res || !res.ok) showError('lobby-error', (res && res.error) || 'Could not start game.');
+    });
+  });
+
+  makeListDraggable(el('lobby-player-list'), (order) => {
+    if (!state.isHost) return;
+    socket.emit('host:reorderTurnOrder', { order }, (res) => {
+      if (!res || !res.ok) renderLobby(); // resync from last known state on rejection
+    });
+  });
+
+  function submitPhysicalRoll(sum, isDouble) {
+    document.querySelectorAll('.dice-btn').forEach((b) => { b.disabled = true; });
+    socket.emit('player:submitRoll', { sum, isDouble }, (res) => {
+      if (!res || !res.ok) {
+        showToast((res && res.error) || 'Could not submit roll.', true);
+        renderGame(); // resync the panel from last known state (turn hasn't moved)
+        return;
+      }
+      showEventToast(res.room);
+    });
+  }
+
+  el('dice-grid').addEventListener('click', (e) => {
+    const room = state.room;
+    const inStartingPhase = isInStartingPhase(room);
+
+    const doubleBtn = e.target.closest('.dice-btn-double');
+    if (doubleBtn) {
+      if (doubleBtn.disabled) return;
+      isDoubleSelected = !isDoubleSelected;
+      doubleBtn.classList.toggle('selected', isDoubleSelected);
+      return;
+    }
+
+    const btn = e.target.closest('.dice-btn');
+    if (!btn || btn.disabled) return;
+    selectedSum = parseInt(btn.dataset.value, 10);
+    document.querySelectorAll('.dice-btn:not(.dice-btn-double)').forEach((b) => b.classList.toggle('selected', b === btn));
+
+    if (room.confirmRolls) {
+      const doubleToggleBtn = el('double-btn');
+      const eligible = !inStartingPhase && DOUBLE_ELIGIBLE_SUMS.has(selectedSum);
+      doubleToggleBtn.disabled = !eligible;
+      if (!eligible) {
+        isDoubleSelected = false;
+        doubleToggleBtn.classList.remove('selected');
+      }
+      el('btn-confirm-roll').disabled = false;
+    } else {
+      // Auto-submit: the number tap itself is the roll. Toggle ×2 first if it applies.
+      submitPhysicalRoll(selectedSum, isDoubleSelected);
+    }
+  });
+
+  el('btn-confirm-roll').addEventListener('click', () => {
+    if (selectedSum === null) return;
+    el('btn-confirm-roll').disabled = true;
+    submitPhysicalRoll(selectedSum, isDoubleSelected);
+  });
+
+  el('btn-roll-dice').addEventListener('click', () => {
+    const btn = el('btn-roll-dice');
+    const anim = el('dice-animation');
+    btn.disabled = true;
+    btn.textContent = '🎲 Rolling…';
+    anim.textContent = '🎲';
+    anim.classList.add('rolling');
+    const startTime = Date.now();
+
+    socket.emit('player:submitRoll', {}, (res) => {
+      const elapsed = Date.now() - startTime;
+      const minDelay = Math.max(0, 500 - elapsed);
+      setTimeout(() => {
+        anim.classList.remove('rolling');
+        btn.disabled = false;
+        btn.textContent = '🎲 Roll Dice';
+        if (!res || !res.ok) {
+          showToast((res && res.error) || 'Could not roll.', true);
+          return;
+        }
+        const lastRoll = [...res.room.events].reverse().find((e) => e.type === 'roll');
+        if (lastRoll && lastRoll.payload.dice) {
+          anim.textContent = lastRoll.payload.dice.map((d) => DIE_FACES[d - 1]).join(' ');
+        }
+        showEventToast(res.room);
+      }, minDelay);
+    });
+  });
+
+  el('btn-chicken-out').addEventListener('click', () => {
+    const btn = el('btn-chicken-out');
+    btn.disabled = true;
+    socket.emit('player:chickenOut', { round: state.room.currentRound }, (res) => {
+      btn.disabled = false;
+      if (!res || !res.ok) {
+        showToast((res && res.error) || 'Could not chicken out.', true);
+        return;
+      }
+      showEventToast(res.room);
+    });
+  });
+
+  el('btn-toggle-host-controls').addEventListener('click', () => {
+    el('host-controls-panel').classList.toggle('hidden');
+  });
+
+  el('btn-host-copy-link').addEventListener('click', () => {
+    const input = el('host-join-link');
+    input.select();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(input.value).catch(() => {});
+    }
+  });
+
+  el('btn-undo-roll').addEventListener('click', () => {
+    const btn = el('btn-undo-roll');
+    btn.disabled = true;
+    socket.emit('host:undoLastRoll', {}, (res) => {
+      if (!res || !res.ok) {
+        showToast((res && res.error) || 'Could not undo.', true);
+        btn.disabled = false;
+      }
+    });
+  });
+
+  // A destructive host action needs a safety net, but native confirm() dialogs render
+  // inconsistently (or not at all) across mobile browsers and the TWA wrapper planned for
+  // later - so instead the button arms itself on first tap ("Confirm?") and only fires on
+  // a second tap within a few seconds. The armed state lives in `armedAction`, not on the
+  // button itself, because host-player-list and event-log both get fully rebuilt on every
+  // room:update (which fires constantly during live play) - a DOM-only flag would get
+  // silently wiped before the second tap could land.
+  el('host-player-list').addEventListener('click', (e) => {
+    const btn = e.target.closest('.btn-kick');
+    if (!btn) return;
+    const row = btn.closest('.player-row');
+    const targetPlayerId = row && row.dataset.id;
+    if (!targetPlayerId) return;
+
+    if (!isArmed('kick', targetPlayerId)) {
+      arm('kick', targetPlayerId, () => renderHostControls(state.room));
+      renderHostControls(state.room);
+      return;
+    }
+
+    disarm();
+    btn.disabled = true;
+    socket.emit('host:kickPlayer', { targetPlayerId }, (res) => {
+      if (!res || !res.ok) showToast((res && res.error) || 'Could not remove player.', true);
+      renderHostControls(state.room);
+    });
+  });
+
+  el('event-log').addEventListener('click', (e) => {
+    const btn = e.target.closest('.btn-reverse');
+    if (!btn) return;
+    const li = btn.closest('.event-log-item');
+    const eventId = li && li.dataset.eventId;
+    if (!eventId) return;
+
+    if (!isArmed('reverse', eventId)) {
+      arm('reverse', eventId, () => renderEventLog(state.room));
+      renderEventLog(state.room);
+      return;
+    }
+
+    disarm();
+    btn.disabled = true;
+    socket.emit('host:reverseChickenOut', { eventId }, (res) => {
+      if (!res || !res.ok) showToast((res && res.error) || 'Could not reverse that.', true);
+      renderEventLog(state.room);
+    });
+  });
+
+  el('btn-new-session').addEventListener('click', () => {
+    const btn = el('btn-new-session');
+    btn.disabled = true;
+    socket.emit('host:startNewSession', {}, (res) => {
+      if (!res || !res.ok) {
+        showToast((res && res.error) || 'Could not start a new session.', true);
+        btn.disabled = false;
+      }
+    });
+  });
+
+  socket.on('room:update', (room) => {
+    if (!state.roomCode || room.code !== state.roomCode) return;
+    state.room = room;
+    renderFromRoom();
+  });
+
+  socket.on('connect', () => {
+    const session = loadSession();
+    if (session && session.roomCode && session.playerId) {
+      socket.emit('player:rejoin', { roomCode: session.roomCode, playerId: session.playerId }, (res) => {
+        if (res && res.ok) {
+          applyJoinedState(res, session.isHost);
+        } else if (!hasHandledInitialConnect) {
+          clearSession();
+          maybePrefillFromUrl();
+        }
+        hasHandledInitialConnect = true;
+      });
+    } else {
+      if (!hasHandledInitialConnect) maybePrefillFromUrl();
+      hasHandledInitialConnect = true;
+    }
+  });
+
+  window.__chicken = { socket, getState: () => state };
+})();
