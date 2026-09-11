@@ -216,6 +216,15 @@ body.bg-hero {
   margin: 0 0 6px;
 }
 
+.coop-icon {
+  height: 22px;
+  width: auto;
+  vertical-align: middle;
+  margin-right: 6px;
+  position: relative;
+  top: -2px;
+}
+
 label {
   display: block;
   font-size: 0.72rem;
