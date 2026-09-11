@@ -223,8 +223,9 @@ function submitRoll(room, playerId, payload) {
   if (!player || !player.activeThisRound) return { error: 'You are not active this round.' };
 
   const preState = snapshotRoundState(room);
+  const inStartingPhase = (room.rollCountThisRound + 1) <= room.startingRolls;
 
-  let sum;
+  let sum = null;
   let isDouble;
   let dice = null;
 
@@ -235,14 +236,27 @@ function submitRoll(room, playerId, payload) {
     sum = d1 + d2;
     isDouble = d1 === d2;
   } else {
-    sum = payload && payload.sum;
-    if (!isValidSum(sum)) return { error: 'Invalid roll.' };
     isDouble = !!(payload && payload.isDouble);
-    if (isDouble && !DOUBLE_ELIGIBLE_SUMS.has(sum)) return { error: 'That sum cannot be a double.' };
+    const claimedSum = payload && payload.sum;
+    const hasSum = isValidSum(claimedSum);
+
+    if (isDouble && !inStartingPhase) {
+      // Live-phase double: the pot just doubles no matter which double it was, so the ×2
+      // button is a complete submission on its own - a sum is optional, not required.
+      if (hasSum) {
+        sum = claimedSum;
+        if (!DOUBLE_ELIGIBLE_SUMS.has(sum)) return { error: 'That sum cannot be a double.' };
+      }
+    } else {
+      // Every other case needs a real sum: plain rolls always, and a starting-phase double
+      // too, since it just adds its sum like any other roll there.
+      if (!hasSum) return { error: 'Invalid roll.' };
+      sum = claimedSum;
+      if (isDouble && !DOUBLE_ELIGIBLE_SUMS.has(sum)) return { error: 'That sum cannot be a double.' };
+    }
   }
 
   room.rollCountThisRound += 1;
-  const inStartingPhase = room.rollCountThisRound <= room.startingRolls;
   let busted = false;
   let potDoubled = false;
   const potBeforeThisRoll = room.pot;
@@ -315,6 +329,7 @@ function undoLastRoll(room, hostId) {
     action: 'undoRoll',
     targetPlayerId: rollEvent.playerId,
     sum: rollEvent.payload.sum,
+    isDouble: rollEvent.payload.isDouble,
   });
 
   return { room };

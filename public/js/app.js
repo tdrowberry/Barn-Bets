@@ -25,9 +25,7 @@
     + '<circle cx="6" cy="16" r="1.6"/><circle cx="14" cy="16" r="1.6"/></svg>';
 
   const DIE_FACES = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
-  const DOUBLE_ELIGIBLE_SUMS = new Set([2, 4, 6, 8, 10, 12]);
   let selectedSum = null;
-  let isDoubleSelected = false;
   let toastTimer = null;
 
   // Host action lists (players, event log) are rebuilt wholesale on every room:update,
@@ -207,7 +205,11 @@
       case 'roll': {
         const p = event.payload;
         if (p.busted) return null; // the paired 'bust' event covers this instead
-        if (p.potDoubled) return `🎲 ${name} rolled ${p.sum} (double!) — pot doubled to ${p.potAfter}.`;
+        if (p.potDoubled) {
+          return p.sum
+            ? `🎲 ${name} rolled ${p.sum} (double!) — pot doubled to ${p.potAfter}.`
+            : `🎲 ${name} rolled a double! — pot doubled to ${p.potAfter}.`;
+        }
         if (p.inStartingPhase && p.sum === 7) return `🎲 ${name} rolled a 7 — +70 to the pot!`;
         return `🎲 ${name} rolled ${p.sum}${p.isDouble ? ' (double)' : ''} — pot now ${p.potAfter}.`;
       }
@@ -221,7 +223,10 @@
         return `🏁 Everyone chickened out — round over.`;
       case 'hostOverride': {
         const a = event.payload;
-        if (a.action === 'undoRoll') return `↩️ Host undid a roll (${a.sum}).`;
+        if (a.action === 'undoRoll') {
+          const rollDesc = a.sum ? `${a.sum}${a.isDouble ? ' double' : ''}` : 'a double';
+          return `↩️ Host undid a roll (${rollDesc}).`;
+        }
         if (a.action === 'reverseChickenOut') {
           const targetName = describeName(room, a.targetPlayerId, viewerId);
           const plural = a.amount === 1 ? '' : 's';
@@ -346,19 +351,16 @@
 
     if (isMyTurn && room.diceMode === 'physical') {
       selectedSum = null;
-      isDoubleSelected = false;
       document.querySelectorAll('.dice-btn').forEach((b) => { b.classList.remove('selected'); b.disabled = false; });
-      const doubleBtn = el('double-btn');
-      // Confirm mode: number picked first, so ×2 stays disabled until a double-eligible
-      // number is selected. Auto-submit mode: the number tap submits immediately, so ×2
-      // (a modifier with no number of its own) must already be toggleable beforehand —
-      // it can only be gated on phase, not on a sum that isn't chosen yet.
-      doubleBtn.disabled = room.confirmRolls ? true : inStartingPhase;
+      // ×2 is its own complete submission (rolls the pot straight to double and passes the
+      // turn) - it needs no number picked first, so it's only ever gated on phase: doubles
+      // don't do anything special until the starting rolls are over.
+      el('double-btn').disabled = inStartingPhase;
       el('btn-confirm-roll').classList.toggle('hidden', !room.confirmRolls);
       el('btn-confirm-roll').disabled = true;
       el('dice-grid-hint').textContent = inStartingPhase
         ? "Starting roll — doubles don't affect the pot yet."
-        : (room.confirmRolls ? 'Tap ×2 too if your dice matched, then confirm.' : 'Tap ×2 first if your dice matched, then tap your number to submit.');
+        : (room.confirmRolls ? 'Tap a number then Confirm, or tap ×2 alone if it was a double.' : 'Tap your number to submit, or tap ×2 alone if it was a double.');
     }
 
     renderScoreboard(room);
@@ -592,14 +594,13 @@
   }
 
   el('dice-grid').addEventListener('click', (e) => {
-    const room = state.room;
-    const inStartingPhase = isInStartingPhase(room);
-
+    // ×2 is a complete roll on its own: no sum needed, tapping it submits immediately and
+    // passes the turn, in both auto-submit and confirm-roll rooms - there's nothing else to
+    // confirm, since past the starting rolls a double's value doesn't change what it does.
     const doubleBtn = e.target.closest('.dice-btn-double');
     if (doubleBtn) {
       if (doubleBtn.disabled) return;
-      isDoubleSelected = !isDoubleSelected;
-      doubleBtn.classList.toggle('selected', isDoubleSelected);
+      submitPhysicalRoll(null, true);
       return;
     }
 
@@ -608,25 +609,17 @@
     selectedSum = parseInt(btn.dataset.value, 10);
     document.querySelectorAll('.dice-btn:not(.dice-btn-double)').forEach((b) => b.classList.toggle('selected', b === btn));
 
-    if (room.confirmRolls) {
-      const doubleToggleBtn = el('double-btn');
-      const eligible = !inStartingPhase && DOUBLE_ELIGIBLE_SUMS.has(selectedSum);
-      doubleToggleBtn.disabled = !eligible;
-      if (!eligible) {
-        isDoubleSelected = false;
-        doubleToggleBtn.classList.remove('selected');
-      }
+    if (state.room.confirmRolls) {
       el('btn-confirm-roll').disabled = false;
     } else {
-      // Auto-submit: the number tap itself is the roll. Toggle ×2 first if it applies.
-      submitPhysicalRoll(selectedSum, isDoubleSelected);
+      submitPhysicalRoll(selectedSum, false);
     }
   });
 
   el('btn-confirm-roll').addEventListener('click', () => {
     if (selectedSum === null) return;
     el('btn-confirm-roll').disabled = true;
-    submitPhysicalRoll(selectedSum, isDoubleSelected);
+    submitPhysicalRoll(selectedSum, false);
   });
 
   el('btn-roll-dice').addEventListener('click', () => {
