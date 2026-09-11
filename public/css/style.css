@@ -226,13 +226,12 @@ body.bg-hero {
 }
 
 .chicken-out-icon {
-  height: 26px;
+  height: 44px;
   width: auto;
   vertical-align: middle;
   margin-right: 8px;
   position: relative;
-  top: -2px;
-  border-radius: 8px;
+  top: -1px;
 }
 
 label {
