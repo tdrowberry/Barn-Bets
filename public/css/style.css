@@ -225,6 +225,16 @@ body.bg-hero {
   top: -2px;
 }
 
+.chicken-out-icon {
+  height: 26px;
+  width: auto;
+  vertical-align: middle;
+  margin-right: 8px;
+  position: relative;
+  top: -2px;
+  border-radius: 8px;
+}
+
 label {
   display: block;
   font-size: 0.72rem;
