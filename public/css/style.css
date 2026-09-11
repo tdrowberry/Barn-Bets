@@ -497,6 +497,12 @@ button { font-family: inherit; }
   color: var(--ink-muted);
 }
 
+.rank-egg {
+  height: 26px;
+  width: auto;
+  vertical-align: middle;
+}
+
 .drag-handle {
   color: var(--ink-muted);
   fill: currentColor;

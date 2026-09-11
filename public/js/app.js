@@ -450,10 +450,10 @@
     renderHostControls(room);
   }
 
+  const RANK_EGGS = { 1: 'gold', 2: 'silver', 3: 'bronze' };
   function rankMedal(rank) {
-    if (rank === 1) return '🥇';
-    if (rank === 2) return '🥈';
-    if (rank === 3) return '🥉';
+    const egg = RANK_EGGS[rank];
+    if (egg) return `<img class="rank-egg" src="/img/egg-${egg}.png" alt="">`;
     return `#${rank}`;
   }
 
