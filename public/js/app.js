@@ -11,6 +11,7 @@
   let hasHandledInitialConnect = false;
 
   const screens = ['screen-landing', 'screen-host-setup', 'screen-join', 'screen-lobby', 'screen-game'];
+  const HERO_BG_SCREENS = new Set(['screen-landing', 'screen-host-setup', 'screen-join']);
 
   const AVATAR_COLORS = ['#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
   function avatarColor(id) {
@@ -27,6 +28,10 @@
   const DIE_FACES = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
   let selectedSum = null;
   let toastTimer = null;
+  // Identifies "which turn" so a roll selection only resets when a genuinely new turn
+  // starts for me, not on every incidental room:update (e.g. someone else chickening out
+  // mid-turn) - includes the room code so a fresh room can never collide with a stale key.
+  let lastMyTurnKey = null;
 
   // Host action lists (players, event log) are rebuilt wholesale on every room:update,
   // which fires constantly during live play - so a "confirm?" arm state stored only on the
@@ -49,10 +54,36 @@
     armedAction = { type, id, timer };
   }
 
+  // For static buttons that are never rebuilt by a re-render (so, unlike kick/reverse, a
+  // DOM-local flag is safe here) - tap once to arm ("Confirm?"), tap again within 3s to fire.
+  function wireConfirmButton(btn, defaultLabel, onConfirmed) {
+    let confirming = false;
+    let timer = null;
+    btn.addEventListener('click', () => {
+      if (!confirming) {
+        confirming = true;
+        btn.classList.add('confirming');
+        btn.textContent = 'Confirm?';
+        timer = setTimeout(() => {
+          confirming = false;
+          btn.classList.remove('confirming');
+          btn.textContent = defaultLabel;
+        }, 3000);
+        return;
+      }
+      clearTimeout(timer);
+      confirming = false;
+      btn.classList.remove('confirming');
+      btn.textContent = defaultLabel;
+      onConfirmed();
+    });
+  }
+
   function el(id) { return document.getElementById(id); }
 
   function showScreen(id) {
     screens.forEach((s) => el(s).classList.toggle('hidden', s !== id));
+    document.body.classList.toggle('bg-hero', HERO_BG_SCREENS.has(id));
   }
 
   function escapeHtml(str) {
@@ -96,6 +127,10 @@
       setTimeout(() => splash.classList.add('hidden'), 500);
     }, 5000);
   }
+  // The landing screen is visible by default straight from the static HTML (no JS needed
+  // to show it), so without this, bg-hero never gets applied until the user navigates away
+  // and back - this makes the initial paint consistent with every later showScreen() call.
+  showScreen('screen-landing');
   maybeShowSplash();
 
   function prefillJoin(code) {
@@ -113,6 +148,7 @@
     state.playerId = res.playerId;
     state.isHost = isHost;
     state.room = res.room;
+    lastMyTurnKey = null; // fresh join/host - don't carry over stale turn-tracking
     saveSession(res.roomCode, res.playerId, isHost);
     renderFromRoom();
   }
@@ -145,25 +181,37 @@
       new QRCode(qrEl, { text: joinUrl, width: 180, height: 180 });
     }
 
-    el('lobby-settings').innerHTML =
-      `<span class="chip">🎲 ${room.roundsTotal} rounds</span>` +
-      `<span class="chip">🛡️ ${room.startingRolls} starting roll${room.startingRolls > 1 ? 's' : ''}</span>` +
-      `<span class="chip">${room.diceMode === 'virtual' ? '📱 Virtual dice' : '✋ Physical dice'}</span>`;
-
+    renderLobbySettingsForm(room);
     renderPlayerList(room);
 
     const startBtn = el('btn-start-game');
     const waitingMsg = el('lobby-waiting-msg');
     const hostHint = el('lobby-host-hint');
+    const settingsHint = el('lobby-settings-hint');
     if (state.isHost) {
       startBtn.classList.remove('hidden');
       waitingMsg.classList.add('hidden');
       hostHint.classList.remove('hidden');
+      settingsHint.classList.add('hidden');
     } else {
       startBtn.classList.add('hidden');
       waitingMsg.classList.remove('hidden');
       hostHint.classList.add('hidden');
+      settingsHint.classList.remove('hidden');
     }
+  }
+
+  function renderLobbySettingsForm(room) {
+    el('lobby-rounds').value = room.roundsTotal;
+    el('lobby-starting-rolls').value = room.startingRolls;
+    el('lobby-dice-mode').value = room.diceMode;
+    el('lobby-confirm-rolls').checked = room.confirmRolls;
+
+    ['lobby-rounds', 'lobby-starting-rolls', 'lobby-dice-mode', 'lobby-confirm-rolls'].forEach((id) => {
+      el(id).disabled = !state.isHost;
+    });
+
+    el('lobby-confirm-rolls-row').classList.toggle('hidden', room.diceMode === 'virtual');
   }
 
   function renderPlayerList(room) {
@@ -292,19 +340,25 @@
     });
   }
 
+  function hideTurnUi() {
+    el('btn-chicken-out').classList.add('hidden');
+    el('game-physical-panel').classList.add('hidden');
+    el('game-virtual-panel').classList.add('hidden');
+    el('host-controls').classList.add('hidden');
+    el('btn-new-session').classList.add('hidden');
+    el('btn-close-room').classList.add('hidden');
+    el('new-session-waiting-msg').classList.add('hidden');
+  }
+
   function showRemovedState() {
     el('game-pot').textContent = '0';
     el('game-round-info').textContent = '';
     el('game-phase-banner').classList.add('hidden');
+    el('game-status-hint').textContent = '';
     const turnEl = el('game-turn-indicator');
     turnEl.textContent = '🚪 You were removed from this game.';
     turnEl.classList.remove('my-turn');
-    el('btn-chicken-out').classList.add('hidden');
-    el('game-inactive-panel').classList.add('hidden');
-    el('game-waiting-panel').classList.add('hidden');
-    el('game-physical-panel').classList.add('hidden');
-    el('game-virtual-panel').classList.add('hidden');
-    el('host-controls').classList.add('hidden');
+    hideTurnUi();
     el('game-scoreboard').innerHTML = '';
     el('event-log').innerHTML = '';
     clearSession();
@@ -319,7 +373,10 @@
     // in the same page load rather than a fresh navigation.
     el('event-log-wrap').classList.remove('hidden');
     el('btn-new-session').classList.add('hidden');
+    el('btn-close-room').classList.add('hidden');
     el('new-session-waiting-msg').classList.add('hidden');
+    el('btn-chicken-out').classList.remove('hidden');
+    el('host-controls').classList.toggle('hidden', !state.isHost);
 
     el('game-pot').textContent = room.pot;
     el('game-round-info').textContent = `Round ${room.currentRound} of ${room.roundsTotal} · Roll ${room.rollCountThisRound + 1}`;
@@ -341,27 +398,52 @@
     turnEl.textContent = isMyTurn ? 'Your turn!' : `${turnPlayer ? turnPlayer.name : '?'}'s turn`;
     turnEl.classList.toggle('my-turn', isMyTurn);
 
-    el('btn-chicken-out').classList.toggle('hidden', !amActive);
-    el('btn-chicken-out').disabled = false;
-
-    el('game-inactive-panel').classList.toggle('hidden', amActive);
-    el('game-waiting-panel').classList.toggle('hidden', !amActive || isMyTurn);
-    el('game-physical-panel').classList.toggle('hidden', !amActive || !isMyTurn || room.diceMode !== 'physical');
-    el('game-virtual-panel').classList.toggle('hidden', !amActive || !isMyTurn || room.diceMode !== 'virtual');
-
-    if (isMyTurn && room.diceMode === 'physical') {
-      selectedSum = null;
-      document.querySelectorAll('.dice-btn').forEach((b) => { b.classList.remove('selected'); b.disabled = false; });
-      // ×2 is its own complete submission (rolls the pot straight to double and passes the
-      // turn) - it needs no number picked first, so it's only ever gated on phase: doubles
-      // don't do anything special until the starting rolls are over.
-      el('double-btn').disabled = inStartingPhase;
-      el('btn-confirm-roll').classList.toggle('hidden', !room.confirmRolls);
-      el('btn-confirm-roll').disabled = true;
-      el('dice-grid-hint').textContent = inStartingPhase
+    let hint;
+    if (!amActive) {
+      hint = "You're sitting out this round — hang tight, you'll be back in for the next one.";
+    } else if (!isMyTurn) {
+      hint = `Waiting for ${turnPlayer ? turnPlayer.name : 'the next player'}'s turn.`;
+    } else if (room.diceMode === 'physical') {
+      hint = inStartingPhase
         ? "Starting roll — doubles don't affect the pot yet."
         : (room.confirmRolls ? 'Tap a number then Confirm, or tap ×2 alone if it was a double.' : 'Tap your number to submit, or tap ×2 alone if it was a double.');
+    } else {
+      hint = "Tap Roll Dice when you're ready.";
     }
+    el('game-status-hint').textContent = hint;
+
+    el('btn-chicken-out').disabled = !amActive;
+
+    // The number grid (and the virtual roll button) always show for everyone in the room's
+    // dice mode - only whether they're tappable changes with whose turn it is. Keeping the
+    // panel itself constantly present (instead of swapping it in and out) is what stops the
+    // screen from visibly resizing every time the turn passes to someone else.
+    el('game-physical-panel').classList.toggle('hidden', room.diceMode !== 'physical');
+    el('game-virtual-panel').classList.toggle('hidden', room.diceMode !== 'virtual');
+
+    // Only reset an in-progress selection when a genuinely new turn starts for me - not on
+    // every render, since other players' actions (e.g. someone chickening out) also trigger
+    // a room:update while it's still my turn and shouldn't wipe what I've already tapped.
+    const turnKey = `${room.code}-${room.currentRound}-${room.turnIndex}`;
+    if (isMyTurn && turnKey !== lastMyTurnKey) {
+      lastMyTurnKey = turnKey;
+      selectedSum = null;
+    }
+
+    document.querySelectorAll('.dice-btn:not(.dice-btn-double)').forEach((b) => {
+      b.disabled = !isMyTurn;
+      b.classList.toggle('selected', isMyTurn && selectedSum === parseInt(b.dataset.value, 10));
+    });
+    el('double-btn').disabled = !isMyTurn || inStartingPhase;
+
+    if (room.confirmRolls) {
+      el('btn-confirm-roll').classList.remove('hidden');
+      el('btn-confirm-roll').disabled = !isMyTurn || selectedSum === null;
+    } else {
+      el('btn-confirm-roll').classList.add('hidden');
+    }
+
+    el('btn-roll-dice').disabled = !isMyTurn;
 
     renderScoreboard(room);
     renderEventLog(room);
@@ -377,9 +459,16 @@
 
   function renderGameFinished() {
     const room = state.room;
+    // A future session could land on the same round/turnIndex this one ended on; clearing
+    // this here guarantees the next renderGame() always treats it as a fresh turn instead
+    // of maybe skipping the selection reset on a key collision.
+    lastMyTurnKey = null;
     el('game-pot').textContent = '0';
-    el('game-round-info').textContent = `Game complete — ${room.roundsTotal} rounds played`;
+    el('game-round-info').textContent = room.endedEarly
+      ? `Game ended early — ${room.roundsTotal} rounds planned`
+      : `Game complete — ${room.roundsTotal} rounds played`;
     el('game-phase-banner').classList.add('hidden');
+    el('game-status-hint').textContent = '';
 
     const sorted = [...room.players].sort((a, b) => b.totalScore - a.totalScore);
     const topScore = sorted.length ? sorted[0].totalScore : 0;
@@ -391,15 +480,11 @@
       : `🏆 ${winners[0] ? winners[0].name : '?'} wins with ${topScore} points!`;
     turnEl.classList.remove('my-turn');
 
-    el('btn-chicken-out').classList.add('hidden');
-    el('game-inactive-panel').classList.add('hidden');
-    el('game-waiting-panel').classList.add('hidden');
-    el('game-physical-panel').classList.add('hidden');
-    el('game-virtual-panel').classList.add('hidden');
-    el('host-controls').classList.add('hidden');
+    hideTurnUi();
     el('event-log-wrap').classList.add('hidden');
 
     el('btn-new-session').classList.toggle('hidden', !state.isHost);
+    el('btn-close-room').classList.toggle('hidden', !state.isHost);
     el('new-session-waiting-msg').classList.toggle('hidden', state.isHost);
 
     renderScoreboard(room);
@@ -518,6 +603,11 @@
 
   // --- Wiring ---
 
+  el('btn-how-to-play').addEventListener('click', () => el('how-to-play-modal').classList.remove('hidden'));
+  function closeHowToPlay() { el('how-to-play-modal').classList.add('hidden'); }
+  el('btn-close-how-to-play').addEventListener('click', closeHowToPlay);
+  el('how-to-play-backdrop').addEventListener('click', closeHowToPlay);
+
   el('btn-host').addEventListener('click', () => showScreen('screen-host-setup'));
   el('btn-join').addEventListener('click', () => showScreen('screen-join'));
   document.querySelectorAll('[data-back]').forEach((btn) => {
@@ -571,6 +661,24 @@
     clearError('lobby-error');
     socket.emit('host:startGame', {}, (res) => {
       if (!res || !res.ok) showError('lobby-error', (res && res.error) || 'Could not start game.');
+    });
+  });
+
+  el('lobby-settings-form').addEventListener('change', (e) => {
+    if (!state.isHost) return;
+    if (e.target.id === 'lobby-dice-mode') {
+      el('lobby-confirm-rolls-row').classList.toggle('hidden', e.target.value === 'virtual');
+    }
+    socket.emit('host:updateSettings', {
+      rounds: el('lobby-rounds').value,
+      startingRolls: el('lobby-starting-rolls').value,
+      diceMode: el('lobby-dice-mode').value,
+      confirmRolls: el('lobby-confirm-rolls').checked,
+    }, (res) => {
+      if (!res || !res.ok) {
+        showError('lobby-error', (res && res.error) || 'Could not update settings.');
+        renderLobbySettingsForm(state.room);
+      }
     });
   });
 
@@ -636,9 +744,9 @@
       const minDelay = Math.max(0, 500 - elapsed);
       setTimeout(() => {
         anim.classList.remove('rolling');
-        btn.disabled = false;
         btn.textContent = '🎲 Roll Dice';
         if (!res || !res.ok) {
+          btn.disabled = false;
           showToast((res && res.error) || 'Could not roll.', true);
           return;
         }
@@ -655,8 +763,8 @@
     const btn = el('btn-chicken-out');
     btn.disabled = true;
     socket.emit('player:chickenOut', { round: state.room.currentRound }, (res) => {
-      btn.disabled = false;
       if (!res || !res.ok) {
+        btn.disabled = false;
         showToast((res && res.error) || 'Could not chicken out.', true);
         return;
       }
@@ -666,6 +774,11 @@
 
   el('btn-toggle-host-controls').addEventListener('click', () => {
     el('host-controls-panel').classList.toggle('hidden');
+  });
+
+  el('btn-toggle-event-log').addEventListener('click', () => {
+    const nowHidden = el('event-log').classList.toggle('hidden');
+    el('event-log-arrow').textContent = nowHidden ? '▾' : '▴';
   });
 
   el('btn-host-copy-link').addEventListener('click', () => {
@@ -684,6 +797,26 @@
         showToast((res && res.error) || 'Could not undo.', true);
         btn.disabled = false;
       }
+    });
+  });
+
+  wireConfirmButton(el('btn-end-game'), '🏁 End Game', () => {
+    el('btn-end-game').disabled = true;
+    socket.emit('host:endGame', {}, (res) => {
+      el('btn-end-game').disabled = false;
+      if (!res || !res.ok) showToast((res && res.error) || 'Could not end the game.', true);
+    });
+  });
+
+  wireConfirmButton(el('btn-close-room'), '🚪 Close Room', () => {
+    el('btn-close-room').disabled = true;
+    socket.emit('host:closeRoom', {}, (res) => {
+      if (!res || !res.ok) {
+        el('btn-close-room').disabled = false;
+        showToast((res && res.error) || 'Could not close the room.', true);
+      }
+      // On success, the room:closed broadcast (which this client also receives) handles
+      // the actual navigation back to the landing screen.
     });
   });
 
@@ -751,6 +884,16 @@
     if (!state.roomCode || room.code !== state.roomCode) return;
     state.room = room;
     renderFromRoom();
+  });
+
+  socket.on('room:closed', () => {
+    clearSession();
+    state.roomCode = null;
+    state.playerId = null;
+    state.isHost = false;
+    state.room = null;
+    showToast('The host closed the room.', false);
+    showScreen('screen-landing');
   });
 
   socket.on('connect', () => {

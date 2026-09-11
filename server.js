@@ -156,6 +156,41 @@ io.on('connection', (socket) => {
     broadcastRoom(room);
   });
 
+  socket.on('host:updateSettings', (payload, ack) => {
+    const reply = typeof ack === 'function' ? ack : () => {};
+    const room = rooms.getRoom(socket.data.roomCode);
+    if (!room) return reply({ ok: false, error: 'Room not found.' });
+
+    const result = rooms.updateSettings(room, socket.data.playerId, payload || {});
+    if (result.error) return reply({ ok: false, error: result.error });
+
+    reply({ ok: true, room: rooms.getRoomSnapshot(room) });
+    broadcastRoom(room);
+  });
+
+  socket.on('host:endGame', (payload, ack) => {
+    const reply = typeof ack === 'function' ? ack : () => {};
+    const room = rooms.getRoom(socket.data.roomCode);
+    if (!room) return reply({ ok: false, error: 'Room not found.' });
+
+    const result = rooms.endGame(room, socket.data.playerId);
+    if (result.error) return reply({ ok: false, error: result.error });
+
+    reply({ ok: true, room: rooms.getRoomSnapshot(room) });
+    broadcastRoom(room);
+  });
+
+  socket.on('host:closeRoom', (payload, ack) => {
+    const reply = typeof ack === 'function' ? ack : () => {};
+    const room = rooms.getRoom(socket.data.roomCode);
+    if (!room) return reply({ ok: false, error: 'Room not found.' });
+    if (socket.data.playerId !== room.hostId) return reply({ ok: false, error: 'Only the host can close the room.' });
+
+    io.to(room.code).emit('room:closed');
+    rooms.deleteRoom(room.code);
+    reply({ ok: true });
+  });
+
   socket.on('disconnect', () => {
     const room = rooms.handleDisconnect(socket.id);
     if (room) broadcastRoom(room);

@@ -18,8 +18,24 @@
   <img src="/img/splash.jpg" alt="Chicken Out - Risk &amp; Luck Game">
 </div>
 
+<div id="how-to-play-modal" class="modal hidden">
+  <div class="modal-backdrop" id="how-to-play-backdrop"></div>
+  <div class="modal-card">
+    <h2>🐔 How to Play</h2>
+    <ul class="how-to-play-list">
+      <li><strong>Take turns rolling</strong> two dice (or tap Roll Dice in virtual mode). Every roll adds to the shared pot.</li>
+      <li>The first few rolls each round are <strong>safe</strong> — even a 7 just adds a bonus 70 to the pot.</li>
+      <li>After that, it's <strong>live</strong>: a 7 busts the round and the pot is lost for everyone still in, but a double instantly <strong>doubles</strong> the pot instead.</li>
+      <li>Tap <strong>🐔 Chicken Out</strong> anytime to lock in the current pot as your score — but you're done for that round.</li>
+      <li>After all the rounds, whoever has the <strong>highest total score</strong> wins!</li>
+    </ul>
+    <button id="btn-close-how-to-play" class="btn-primary" type="button">Got it!</button>
+  </div>
+</div>
+
 <div id="app">
   <header class="app-header">
+    <button id="btn-how-to-play" class="how-to-play-btn" type="button">❓ How to Play</button>
     <h1><img class="logo-icon" src="/img/logo.jpg" alt="">Chicken</h1>
     <p class="app-tagline">Push your luck</p>
   </header>
@@ -77,7 +93,27 @@
       <input type="text" id="lobby-join-link" readonly autocomplete="off">
       <button id="btn-copy-link" class="btn-small" type="button">📋 Copy</button>
     </div>
-    <div class="settings-chips" id="lobby-settings"></div>
+
+    <h3>Game settings</h3>
+    <p class="hint hidden" id="lobby-settings-hint">Only the host can change these.</p>
+    <div class="lobby-settings-form" id="lobby-settings-form">
+      <label>Rounds (5–35)
+        <input type="number" id="lobby-rounds" min="5" max="35">
+      </label>
+      <label>Starting rolls (1–5)
+        <input type="number" id="lobby-starting-rolls" min="1" max="5">
+      </label>
+      <label>Dice mode
+        <select id="lobby-dice-mode">
+          <option value="physical">Physical (report your own dice)</option>
+          <option value="virtual">Virtual (app rolls for you)</option>
+        </select>
+      </label>
+      <label class="checkbox-row" id="lobby-confirm-rolls-row">
+        <input type="checkbox" id="lobby-confirm-rolls">
+        <span>Require a confirm tap before each roll</span>
+      </label>
+    </div>
 
     <h3>Turn order</h3>
     <p class="hint hidden" id="lobby-host-hint">Drag the handle to reorder. This sets the play order.</p>
@@ -100,56 +136,50 @@
     <p class="phase-banner" id="game-phase-banner">Starting rolls — safe from a bust</p>
     <p class="roll-toast hidden" id="roll-toast"></p>
     <h2 class="turn-indicator" id="game-turn-indicator">Waiting…</h2>
+    <p class="hint" id="game-status-hint" style="text-align:center;"></p>
 
-    <button id="btn-chicken-out" class="btn-danger hidden" type="button">🐔 Chicken Out</button>
-
-    <div id="game-waiting-panel" class="hidden">
-      <p class="hint" style="text-align:center;">Watching — it's not your turn yet.</p>
-    </div>
-
-    <div id="game-inactive-panel" class="hidden">
-      <p class="hint" style="text-align:center;">You're sitting out this round — hang tight, you'll be back in for the next one.</p>
-    </div>
+    <button id="btn-chicken-out" class="btn-danger" type="button" disabled>🐔 Chicken Out</button>
 
     <div id="game-physical-panel" class="hidden">
       <div class="dice-grid" id="dice-grid">
-        <button type="button" class="dice-btn" data-value="2">2</button>
-        <button type="button" class="dice-btn" data-value="3">3</button>
-        <button type="button" class="dice-btn" data-value="4">4</button>
-        <button type="button" class="dice-btn" data-value="5">5</button>
-        <button type="button" class="dice-btn" data-value="6">6</button>
-        <button type="button" class="dice-btn" data-value="7">7</button>
-        <button type="button" class="dice-btn" data-value="8">8</button>
-        <button type="button" class="dice-btn" data-value="9">9</button>
-        <button type="button" class="dice-btn" data-value="10">10</button>
-        <button type="button" class="dice-btn" data-value="11">11</button>
-        <button type="button" class="dice-btn" data-value="12">12</button>
+        <button type="button" class="dice-btn" data-value="2" disabled>2</button>
+        <button type="button" class="dice-btn" data-value="3" disabled>3</button>
+        <button type="button" class="dice-btn" data-value="4" disabled>4</button>
+        <button type="button" class="dice-btn" data-value="5" disabled>5</button>
+        <button type="button" class="dice-btn" data-value="6" disabled>6</button>
+        <button type="button" class="dice-btn" data-value="7" disabled>7</button>
+        <button type="button" class="dice-btn" data-value="8" disabled>8</button>
+        <button type="button" class="dice-btn" data-value="9" disabled>9</button>
+        <button type="button" class="dice-btn" data-value="10" disabled>10</button>
+        <button type="button" class="dice-btn" data-value="11" disabled>11</button>
+        <button type="button" class="dice-btn" data-value="12" disabled>12</button>
         <button type="button" class="dice-btn dice-btn-double" id="double-btn" disabled>×2</button>
       </div>
-      <p class="hint dice-grid-hint" id="dice-grid-hint">Tap ×2 alone if your dice matched.</p>
-      <button id="btn-confirm-roll" class="btn-primary" type="button" disabled>Confirm Roll</button>
+      <button id="btn-confirm-roll" class="btn-primary hidden" type="button" disabled>Confirm Roll</button>
     </div>
 
     <div id="game-virtual-panel" class="hidden">
       <div class="dice-animation" id="dice-animation">🎲</div>
-      <button id="btn-roll-dice" class="btn-primary" type="button">🎲 Roll Dice</button>
+      <button id="btn-roll-dice" class="btn-primary" type="button" disabled>🎲 Roll Dice</button>
     </div>
 
-    <h3>Scoreboard</h3>
+    <h3>🐔 Coop</h3>
     <ul id="game-scoreboard" class="player-list"></ul>
 
     <button id="btn-new-session" class="btn-primary hidden" type="button">🔄 Start New Session (Same Players)</button>
     <p class="hint hidden" id="new-session-waiting-msg" style="text-align:center;">Waiting for the host to start a new session…</p>
+    <button id="btn-close-room" class="btn-danger hidden" type="button">🚪 Close Room</button>
 
     <div id="event-log-wrap">
-      <h3>Event Log</h3>
-      <ul id="event-log" class="event-log"></ul>
+      <button id="btn-toggle-event-log" class="event-log-toggle" type="button">📜 Event Log <span id="event-log-arrow">▾</span></button>
+      <ul id="event-log" class="event-log hidden"></ul>
     </div>
 
     <div id="host-controls" class="host-controls hidden">
       <button id="btn-toggle-host-controls" class="host-controls-toggle" type="button">⚙️ Host Controls</button>
       <div id="host-controls-panel" class="host-controls-panel hidden">
         <button id="btn-undo-roll" class="btn-host" type="button">↩️ Undo Last Roll</button>
+        <button id="btn-end-game" class="btn-danger" type="button">🏁 End Game</button>
 
         <p class="hint">Late players can still join with the same QR code or link — they'll start at zero, active next round.</p>
         <div class="room-code-display">Room code <span class="room-code-badge" id="host-room-code">----</span></div>

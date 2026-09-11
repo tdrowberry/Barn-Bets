@@ -84,6 +84,7 @@ function createRoom({ hostName, rounds, startingRolls, diceMode, confirmRolls })
     turnIndex: 0,
     players: new Map([[host.id, host]]),
     events: [],
+    endedEarly: false,
     createdAt: Date.now(),
   };
 
@@ -147,6 +148,7 @@ function startGame(room, playerId) {
   room.rollCountThisRound = 0;
   room.pot = 0;
   room.turnIndex = 0;
+  room.endedEarly = false;
   for (const p of room.players.values()) p.activeThisRound = true;
 
   logEvent(room, 'hostOverride', playerId, { action: 'startGame' });
@@ -492,6 +494,37 @@ function startNewSession(room, hostId) {
   return { room };
 }
 
+// Lets the host tweak rounds/starting rolls/dice mode/confirm-rolls for players who are
+// sticking around for another game, without having to recreate the room from scratch.
+function updateSettings(room, hostId, { rounds, startingRolls, diceMode, confirmRolls }) {
+  if (hostId !== room.hostId) return { error: 'Only the host can change settings.' };
+  if (room.status !== 'lobby') return { error: 'Settings can only be changed in the lobby.' };
+
+  room.roundsTotal = clampInt(rounds, 5, 35, room.roundsTotal);
+  room.startingRolls = clampInt(startingRolls, 1, 5, room.startingRolls);
+  room.diceMode = diceMode === 'virtual' ? 'virtual' : 'physical';
+  room.confirmRolls = !!confirmRolls;
+
+  return { room };
+}
+
+// Ends the session right now, whatever round it's on, and shows the leaderboard as it
+// stands - the same screen a game reaching its configured round count lands on.
+function endGame(room, hostId) {
+  if (hostId !== room.hostId) return { error: 'Only the host can end the game.' };
+  if (room.status !== 'active') return { error: 'Game is not active.' };
+
+  room.status = 'finished';
+  room.endedEarly = true;
+
+  return { room };
+}
+
+function deleteRoom(code) {
+  if (!code || typeof code !== 'string') return;
+  rooms.delete(code.toUpperCase());
+}
+
 function handleDisconnect(socketId) {
   for (const room of rooms.values()) {
     for (const p of room.players.values()) {
@@ -514,6 +547,7 @@ function getRoomSnapshot(room) {
     diceMode: room.diceMode,
     confirmRolls: room.confirmRolls,
     status: room.status,
+    endedEarly: room.endedEarly,
     currentRound: room.currentRound,
     rollCountThisRound: room.rollCountThisRound,
     pot: room.pot,
@@ -551,6 +585,9 @@ module.exports = {
   reverseChickenOut,
   kickPlayer,
   startNewSession,
+  updateSettings,
+  endGame,
+  deleteRoom,
   handleDisconnect,
   getRoomSnapshot,
 };
