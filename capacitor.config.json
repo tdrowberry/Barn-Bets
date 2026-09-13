@@ -1,0 +1,9 @@
+{
+  "appId": "com.tdrowberry.chickenout",
+  "appName": "Chicken Out",
+  "webDir": "public",
+  "server": {
+    "url": "https://chicken-out.onrender.com",
+    "androidScheme": "https"
+  }
+}
