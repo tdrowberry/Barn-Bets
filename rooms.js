@@ -99,7 +99,7 @@ function createRoom({ hostName, rounds, startingRolls, diceMode, confirmRolls, p
 // to joinRoom (same late-join-sits-out-this-round behavior).
 function addLocalPlayer(room, hostId, name) {
   if (hostId !== room.hostId) return { error: 'Only the host can add players.' };
-  if (!room.isPassAndPlay) return { error: 'This room is not set up for pass-and-play.' };
+  if (!room.isPassAndPlay) return { error: 'This room is not set up for one phone play.' };
   if (room.status === 'finished') return { error: 'This game has already ended.' };
 
   const cleaned = cleanName(name);

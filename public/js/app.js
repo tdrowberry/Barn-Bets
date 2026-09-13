@@ -651,9 +651,9 @@
   el('btn-join').addEventListener('click', () => showScreen('screen-join'));
   el('btn-pass-play').addEventListener('click', () => {
     pendingPassAndPlay = true;
-    el('host-setup-title').textContent = 'Pass & Play Setup';
+    el('host-setup-title').textContent = 'One Phone Play Setup';
     el('pass-play-hint').classList.remove('hidden');
-    el('btn-create-room').textContent = '📱 Start Pass & Play';
+    el('btn-create-room').textContent = '📱 Start One Phone Play';
     showScreen('screen-host-setup');
   });
   document.querySelectorAll('[data-back]').forEach((btn) => {
