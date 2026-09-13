@@ -299,6 +299,7 @@ button { font-family: inherit; }
 
 .btn-primary,
 .btn-secondary,
+.btn-tertiary,
 .btn-danger,
 .btn-link {
   display: block;
@@ -330,6 +331,14 @@ button { font-family: inherit; }
 }
 .btn-secondary:hover { filter: brightness(1.05); transform: translateY(-1px); }
 .btn-secondary:active { transform: translateY(1px) scale(0.99); box-shadow: 0 4px 10px rgba(13, 148, 136, 0.28); }
+
+.btn-tertiary {
+  background: linear-gradient(135deg, #c4b5fd, #7c3aed);
+  color: #fff;
+  box-shadow: 0 8px 20px rgba(124, 58, 237, 0.32);
+}
+.btn-tertiary:hover { filter: brightness(1.05); transform: translateY(-1px); }
+.btn-tertiary:active { transform: translateY(1px) scale(0.99); box-shadow: 0 4px 10px rgba(124, 58, 237, 0.28); }
 
 .btn-danger {
   background: linear-gradient(135deg, #f87171, var(--red));
@@ -422,6 +431,17 @@ button { font-family: inherit; }
   display: flex;
   gap: 8px;
   margin-bottom: 20px;
+}
+
+.add-player-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.add-player-row input {
+  flex: 1;
+  margin-top: 0;
 }
 
 .join-link-row input {
@@ -878,3 +898,17 @@ button { font-family: inherit; }
   white-space: nowrap;
 }
 .btn-kick:hover { background: rgba(229, 72, 77, 0.22); }
+
+.btn-chicken-small {
+  flex-shrink: 0;
+  border: none;
+  background: rgba(229, 72, 77, 0.12);
+  color: var(--red-dark);
+  font-weight: 800;
+  font-size: 0.72rem;
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-chicken-small:hover { background: rgba(229, 72, 77, 0.22); }

@@ -72,6 +72,18 @@ io.on('connection', (socket) => {
     broadcastRoom(room);
   });
 
+  socket.on('host:addLocalPlayer', (payload, ack) => {
+    const reply = typeof ack === 'function' ? ack : () => {};
+    const room = rooms.getRoom(socket.data.roomCode);
+    if (!room) return reply({ ok: false, error: 'Room not found.' });
+
+    const result = rooms.addLocalPlayer(room, socket.data.playerId, (payload || {}).name);
+    if (result.error) return reply({ ok: false, error: result.error });
+
+    reply({ ok: true, room: rooms.getRoomSnapshot(room) });
+    broadcastRoom(room);
+  });
+
   socket.on('host:startGame', (payload, ack) => {
     const reply = typeof ack === 'function' ? ack : () => {};
     const room = rooms.getRoom(socket.data.roomCode);

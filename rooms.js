@@ -58,7 +58,7 @@ function getRoom(code) {
   return rooms.get(code.toUpperCase()) || null;
 }
 
-function createRoom({ hostName, rounds, startingRolls, diceMode, confirmRolls }) {
+function createRoom({ hostName, rounds, startingRolls, diceMode, confirmRolls, passAndPlay }) {
   const name = cleanName(hostName);
   if (!name) return { error: 'Enter your name.' };
 
@@ -76,6 +76,7 @@ function createRoom({ hostName, rounds, startingRolls, diceMode, confirmRolls })
     startingRolls: startingRollsClamped,
     diceMode: mode,
     confirmRolls: !!confirmRolls, // physical mode only; default is auto-submit on tap
+    isPassAndPlay: !!passAndPlay, // one shared device speaks for every player - see submitRoll/chickenOut
     status: 'lobby', // lobby | active | finished
     currentRound: 0,
     rollCountThisRound: 0,
@@ -91,6 +92,27 @@ function createRoom({ hostName, rounds, startingRolls, diceMode, confirmRolls })
   rooms.set(code, room);
   logEvent(room, 'join', host.id, { name: host.name, host: true });
   return { room, player: host };
+}
+
+// Pass-and-play only: the host adds a local player directly from the one shared device,
+// instead of that player joining over the network with their own socket. Otherwise identical
+// to joinRoom (same late-join-sits-out-this-round behavior).
+function addLocalPlayer(room, hostId, name) {
+  if (hostId !== room.hostId) return { error: 'Only the host can add players.' };
+  if (!room.isPassAndPlay) return { error: 'This room is not set up for pass-and-play.' };
+  if (room.status === 'finished') return { error: 'This game has already ended.' };
+
+  const cleaned = cleanName(name);
+  if (!cleaned) return { error: 'Enter a name.' };
+
+  const player = createPlayer(cleaned, false);
+  const late = room.status === 'active';
+  if (late) player.activeThisRound = false;
+
+  room.players.set(player.id, player);
+  room.turnOrder.push(player.id);
+  logEvent(room, 'join', player.id, { name: player.name, late });
+  return { room, player };
 }
 
 function joinRoom({ roomCode, name }) {
@@ -219,9 +241,16 @@ function submitRoll(room, playerId, payload) {
   if (room.status !== 'active') return { error: 'Game is not active.' };
 
   const currentPlayerId = room.turnOrder[room.turnIndex];
-  if (playerId !== currentPlayerId) return { error: 'Not your turn.' };
+  // Pass-and-play's one shared device speaks for every player, so its own playerId will
+  // almost never match whoever's actual turn it is - the room is the authority on who's up,
+  // not which socket asked. Scoped to the HOST's socket specifically (not just "this room
+  // happens to be pass-and-play") so a guest who joined a pass-and-play room by normal link
+  // can't act as anyone but themselves.
+  const isPassAndPlayHost = room.isPassAndPlay && playerId === room.hostId;
+  const actingPlayerId = isPassAndPlayHost ? currentPlayerId : playerId;
+  if (!isPassAndPlayHost && playerId !== currentPlayerId) return { error: 'Not your turn.' };
 
-  const player = room.players.get(playerId);
+  const player = room.players.get(actingPlayerId);
   if (!player || !player.activeThisRound) return { error: 'You are not active this round.' };
 
   const preState = snapshotRoundState(room);
@@ -275,7 +304,7 @@ function submitRoll(room, playerId, payload) {
     room.pot += sum;
   }
 
-  logEvent(room, 'roll', playerId, {
+  logEvent(room, 'roll', actingPlayerId, {
     sum,
     isDouble,
     dice,
@@ -290,7 +319,7 @@ function submitRoll(room, playerId, payload) {
   const busterIndex = room.turnIndex;
 
   if (busted) {
-    logEvent(room, 'bust', playerId, { round: room.currentRound, potLost: potBeforeThisRoll });
+    logEvent(room, 'bust', actingPlayerId, { round: room.currentRound, potLost: potBeforeThisRoll });
     startNewRound(room, busterIndex);
   } else {
     room.turnIndex = nextActiveIndex(room, room.turnIndex);
@@ -358,13 +387,21 @@ function findPotFromRecentRoundEnd(room) {
 function chickenOut(room, playerId, payload) {
   if (room.status !== 'active') return { error: 'Game is not active.' };
 
-  const player = room.players.get(playerId);
+  // Pass-and-play's one shared device (the host's socket) can chicken out any active player,
+  // not just whoever's turn it is, so it names its target explicitly instead of relying on
+  // which socket asked - scoped to the host specifically, same reasoning as submitRoll above.
+  const isPassAndPlayHost = room.isPassAndPlay && playerId === room.hostId;
+  const targetPlayerId = isPassAndPlayHost && payload && payload.targetPlayerId
+    ? payload.targetPlayerId
+    : playerId;
+
+  const player = room.players.get(targetPlayerId);
   if (!player) return { error: 'Player not found.' };
   if (!player.activeThisRound) return { error: 'You have already chickened out this round.' };
 
   const claimedRound = payload && payload.round;
   if (claimedRound !== room.currentRound) {
-    logEvent(room, 'chickenOutRejected', playerId, {
+    logEvent(room, 'chickenOutRejected', targetPlayerId, {
       claimedRound,
       actualRound: room.currentRound,
       potAtRejection: findPotFromRecentRoundEnd(room),
@@ -376,9 +413,9 @@ function chickenOut(room, playerId, payload) {
   player.activeThisRound = false;
   player.totalScore += potWon;
 
-  logEvent(room, 'chickenOut', playerId, { potWon, scoreAfter: player.totalScore, round: room.currentRound });
+  logEvent(room, 'chickenOut', targetPlayerId, { potWon, scoreAfter: player.totalScore, round: room.currentRound });
 
-  const wasCurrentTurn = room.turnOrder[room.turnIndex] === playerId;
+  const wasCurrentTurn = room.turnOrder[room.turnIndex] === targetPlayerId;
   const anyoneStillActive = room.turnOrder.some((id) => {
     const p = room.players.get(id);
     return p && p.activeThisRound;
@@ -546,6 +583,7 @@ function getRoomSnapshot(room) {
     startingRolls: room.startingRolls,
     diceMode: room.diceMode,
     confirmRolls: room.confirmRolls,
+    isPassAndPlay: room.isPassAndPlay,
     status: room.status,
     endedEarly: room.endedEarly,
     currentRound: room.currentRound,
@@ -575,6 +613,7 @@ function getRoomSnapshot(room) {
 module.exports = {
   getRoom,
   createRoom,
+  addLocalPlayer,
   joinRoom,
   rejoinRoom,
   reorderTurnOrder,

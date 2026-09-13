@@ -172,6 +172,9 @@
     const room = state.room;
     el('lobby-room-code').textContent = room.code;
 
+    el('lobby-join-section').classList.toggle('hidden', !!room.isPassAndPlay);
+    el('lobby-add-player-row').classList.toggle('hidden', !(room.isPassAndPlay && state.isHost));
+
     const joinUrl = `${window.location.origin}/?room=${room.code}`;
     el('lobby-join-link').value = joinUrl;
 
@@ -391,18 +394,34 @@
 
     const turnPlayerId = room.turnOrder[room.turnIndex];
     const turnPlayer = room.players.find((p) => p.id === turnPlayerId);
-    const amActive = !!(me && me.activeThisRound);
-    const isMyTurn = amActive && turnPlayerId === state.playerId;
+    // Pass-and-play has one shared device speaking for whoever's turn it currently is, so
+    // there's no fixed "me" to gate controls on - the device is always the active turn's
+    // controller, and per-player chicken-out buttons (in the scoreboard) cover the "anytime"
+    // case instead of the single global button. Scoped to the host specifically (matching
+    // the server) so a guest who joined a pass-and-play room by normal link still only ever
+    // controls their own turn, not everyone's.
+    const passAndPlay = !!room.isPassAndPlay && state.isHost;
+    const amActive = passAndPlay ? true : !!(me && me.activeThisRound);
+    const isMyTurn = passAndPlay ? true : (amActive && turnPlayerId === state.playerId);
+    const turnPlayerName = turnPlayer ? turnPlayer.name : 'the next player';
 
     const turnEl = el('game-turn-indicator');
-    turnEl.textContent = isMyTurn ? 'Your turn!' : `${turnPlayer ? turnPlayer.name : '?'}'s turn`;
-    turnEl.classList.toggle('my-turn', isMyTurn);
+    turnEl.textContent = (!passAndPlay && isMyTurn) ? 'Your turn!' : `${turnPlayerName}'s turn`;
+    turnEl.classList.toggle('my-turn', !passAndPlay && isMyTurn);
 
     let hint;
-    if (!amActive) {
+    if (passAndPlay) {
+      if (room.diceMode === 'physical') {
+        hint = inStartingPhase
+          ? `Starting roll for ${turnPlayerName} — doubles don't affect the pot yet.`
+          : `Enter ${turnPlayerName}'s roll, or tap ×2 alone if it was a double.`;
+      } else {
+        hint = `Tap Roll Dice for ${turnPlayerName}.`;
+      }
+    } else if (!amActive) {
       hint = "You're sitting out this round — hang tight, you'll be back in for the next one.";
     } else if (!isMyTurn) {
-      hint = `Waiting for ${turnPlayer ? turnPlayer.name : 'the next player'}'s turn.`;
+      hint = `Waiting for ${turnPlayerName}'s turn.`;
     } else if (room.diceMode === 'physical') {
       hint = inStartingPhase
         ? "Starting roll — doubles don't affect the pot yet."
@@ -412,6 +431,9 @@
     }
     el('game-status-hint').textContent = hint;
 
+    // The single global button only makes sense when it's tied to one connected player;
+    // pass-and-play instead gets a chicken-out button per active player in the scoreboard.
+    el('btn-chicken-out').classList.toggle('hidden', passAndPlay);
     el('btn-chicken-out').disabled = !amActive;
 
     // The number grid (and the virtual roll button) always show for everyone in the room's
@@ -494,6 +516,7 @@
     const ul = el('game-scoreboard');
     ul.innerHTML = '';
     const isFinal = room.status === 'finished';
+    const showChickenOutButtons = room.isPassAndPlay && state.isHost && room.status === 'active';
     const sorted = [...room.players].sort((a, b) => b.totalScore - a.totalScore);
 
     let rank = 0;
@@ -502,14 +525,19 @@
       if (p.totalScore !== lastScore) { rank = idx + 1; lastScore = p.totalScore; }
       const li = document.createElement('li');
       li.className = 'player-row' + (isFinal && rank === 1 ? ' rank-1' : '');
+      li.dataset.id = p.id;
       const initial = escapeHtml((p.name.charAt(0) || '?').toUpperCase());
       const isTurn = room.status === 'active' && room.turnOrder[room.turnIndex] === p.id;
       const rankBadge = isFinal ? `<span class="rank-badge">${rankMedal(rank)}</span>` : '';
+      const chickenBtn = (showChickenOutButtons && p.activeThisRound)
+        ? '<button type="button" class="btn-chicken-small">🐔 Out</button>'
+        : '';
       li.innerHTML =
         rankBadge +
         `<span class="player-avatar" style="background:${avatarColor(p.id)}">${initial}</span>` +
         `<span class="player-name">${escapeHtml(p.name)}${p.isHost ? ' <span class="host-tag">Host</span>' : ''}${isTurn ? ' <span class="turn-tag">Turn</span>' : ''}</span>` +
-        `<span class="score-value">${p.totalScore}</span>`;
+        `<span class="score-value">${p.totalScore}</span>` +
+        chickenBtn;
       ul.appendChild(li);
     });
   }
@@ -608,8 +636,26 @@
   el('btn-close-how-to-play').addEventListener('click', closeHowToPlay);
   el('how-to-play-backdrop').addEventListener('click', closeHowToPlay);
 
-  el('btn-host').addEventListener('click', () => showScreen('screen-host-setup'));
+  // Both "Host a Game" and "Pass & Play" land on the same setup form (same settings fields
+  // apply to both) - this flag just tags which one so btn-create-room knows what to send,
+  // and the copy on-screen reflects which mode was picked.
+  let pendingPassAndPlay = false;
+
+  el('btn-host').addEventListener('click', () => {
+    pendingPassAndPlay = false;
+    el('host-setup-title').textContent = 'Host a Game';
+    el('pass-play-hint').classList.add('hidden');
+    el('btn-create-room').textContent = '🎲 Create Room';
+    showScreen('screen-host-setup');
+  });
   el('btn-join').addEventListener('click', () => showScreen('screen-join'));
+  el('btn-pass-play').addEventListener('click', () => {
+    pendingPassAndPlay = true;
+    el('host-setup-title').textContent = 'Pass & Play Setup';
+    el('pass-play-hint').classList.remove('hidden');
+    el('btn-create-room').textContent = '📱 Start Pass & Play';
+    showScreen('screen-host-setup');
+  });
   document.querySelectorAll('[data-back]').forEach((btn) => {
     btn.addEventListener('click', () => showScreen(btn.dataset.back));
   });
@@ -625,6 +671,7 @@
       startingRolls: el('host-starting-rolls').value,
       diceMode: el('host-dice-mode').value,
       confirmRolls: el('host-confirm-rolls').checked,
+      passAndPlay: pendingPassAndPlay,
     }, (res) => {
       if (!res || !res.ok) return showError('host-setup-error', (res && res.error) || 'Could not create room.');
       applyJoinedState(res, true);
@@ -680,6 +727,23 @@
         renderLobbySettingsForm(state.room);
       }
     });
+  });
+
+  function addLocalPlayerFromInput() {
+    const input = el('lobby-new-player-name');
+    const name = input.value.trim();
+    clearError('lobby-add-player-error');
+    if (!name) return showError('lobby-add-player-error', 'Enter a name.');
+
+    socket.emit('host:addLocalPlayer', { name }, (res) => {
+      if (!res || !res.ok) return showError('lobby-add-player-error', (res && res.error) || 'Could not add player.');
+      input.value = '';
+      input.focus();
+    });
+  }
+  el('btn-add-local-player').addEventListener('click', addLocalPlayerFromInput);
+  el('lobby-new-player-name').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); addLocalPlayerFromInput(); }
   });
 
   makeListDraggable(el('lobby-player-list'), (order) => {
@@ -769,6 +833,23 @@
         return;
       }
       showEventToast(res.room);
+    });
+  });
+
+  // Pass-and-play only: chicken-out is available for any active player at any time, not
+  // just whoever's turn it is, since there's no single "me" to tie the global button to -
+  // each row gets its own button instead, naming its target explicitly.
+  el('game-scoreboard').addEventListener('click', (e) => {
+    const btn = e.target.closest('.btn-chicken-small');
+    if (!btn) return;
+    const row = btn.closest('.player-row');
+    const targetPlayerId = row && row.dataset.id;
+    if (!targetPlayerId) return;
+
+    btn.disabled = true;
+    socket.emit('player:chickenOut', { round: state.room.currentRound, targetPlayerId }, (res) => {
+      if (!res || !res.ok) showToast((res && res.error) || 'Could not chicken out.', true);
+      else showEventToast(res.room);
     });
   });
 
