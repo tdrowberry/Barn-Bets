@@ -295,7 +295,16 @@ input:focus, select:focus {
   box-shadow: 0 0 0 4px rgba(244, 180, 0, 0.22);
 }
 
-button { font-family: inherit; }
+button {
+  font-family: inherit;
+  /* Without this, some mobile browsers wait ~300ms after a tap to see if a second tap is
+     coming (double-tap-to-zoom detection) before firing click - which reads exactly like "I
+     tapped a number and it highlighted but didn't submit until I tapped it again." This tells
+     the browser taps on buttons are never a zoom gesture, so click fires immediately. */
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
 
 .btn-primary,
 .btn-secondary,
