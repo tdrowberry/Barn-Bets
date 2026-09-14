@@ -431,10 +431,15 @@ function chickenOut(room, playerId, payload) {
   return { room };
 }
 
-// Flips a past chicken-out ruling: an accepted one gets its score clawed back (and the
+// Toggles a past chicken-out ruling: an accepted one gets its score clawed back (and the
 // player reactivated, if that round is still the current one); a rejected one gets paid out
-// for what the pot was worth when it should have landed. Each ruling can only be reversed
-// once.
+// for what the pot was worth when it should have landed. Calling this again on the same
+// ruling flips it right back - a "redo" for when the host reverses the wrong person - by
+// applying the exact inverse of whichever half just ran.
+//
+// This is also the fix for the physical-dice race where a player peeks at a bust coming and
+// taps Chicken Out before the roller can enter the 7: the host can't stop that in the
+// moment, but can claw the score back after the fact once they realize what happened.
 function reverseChickenOut(room, hostId, eventId) {
   if (hostId !== room.hostId) return { error: 'Only the host can do that.' };
 
@@ -443,28 +448,30 @@ function reverseChickenOut(room, hostId, eventId) {
   if (event.type !== 'chickenOut' && event.type !== 'chickenOutRejected') {
     return { error: 'That event is not a chicken-out ruling.' };
   }
-  if (event.reversed) return { error: 'That ruling has already been reversed.' };
 
   const player = room.players.get(event.playerId);
   if (!player) return { error: 'Player not found.' };
+
+  const nowReversed = !event.reversed;
+  const sign = nowReversed ? 1 : -1; // +1 applying the reversal, -1 undoing it (redo)
 
   let amount = 0;
   let direction;
 
   if (event.type === 'chickenOut') {
     amount = event.payload.potWon;
-    player.totalScore -= amount;
-    direction = 'toRejected';
+    player.totalScore -= sign * amount;
+    direction = nowReversed ? 'toRejected' : 'toAccepted';
     if (room.status === 'active' && event.payload.round === room.currentRound) {
-      player.activeThisRound = true;
+      player.activeThisRound = nowReversed;
     }
   } else {
     amount = typeof event.payload.potAtRejection === 'number' ? event.payload.potAtRejection : 0;
-    player.totalScore += amount;
-    direction = 'toAccepted';
+    player.totalScore += sign * amount;
+    direction = nowReversed ? 'toAccepted' : 'toRejected';
   }
 
-  event.reversed = true;
+  event.reversed = nowReversed;
   logEvent(room, 'hostOverride', hostId, {
     action: 'reverseChickenOut',
     direction,

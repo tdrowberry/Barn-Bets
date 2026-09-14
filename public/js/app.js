@@ -334,11 +334,11 @@
       li.className = 'event-log-item' + (event.type === 'chickenOutRejected' ? ' rejected' : '');
       li.dataset.eventId = event.id;
       const canReverse = state.isHost
-        && (event.type === 'chickenOut' || event.type === 'chickenOutRejected')
-        && !event.reversed;
+        && (event.type === 'chickenOut' || event.type === 'chickenOutRejected');
       const armed = isArmed('reverse', event.id);
+      const reverseLabel = armed ? 'Confirm?' : (event.reversed ? '↺ Redo' : '↩ Undo');
       li.innerHTML = `<span class="event-text">${escapeHtml(msg)}</span>`
-        + (canReverse ? `<button type="button" class="btn-reverse${armed ? ' confirming' : ''}">${armed ? 'Confirm?' : '↩ Reverse'}</button>` : '');
+        + (canReverse ? `<button type="button" class="btn-reverse${armed ? ' confirming' : ''}">${reverseLabel}</button>` : '');
       ul.appendChild(li);
     });
   }
@@ -512,11 +512,28 @@
     renderScoreboard(room);
   }
 
+  // The most recent chicken-out ruling (accepted or rejected) logged for this player, if
+  // any - this is what a per-player undo/redo button on the scoreboard acts on. A player can
+  // have several over a long game; only the latest one is reachable from their row (older
+  // ones are still reachable from the event log if needed).
+  function findLastChickenOutEvent(room, playerId) {
+    for (let i = room.events.length - 1; i >= 0; i--) {
+      const e = room.events[i];
+      if (e.playerId === playerId && (e.type === 'chickenOut' || e.type === 'chickenOutRejected')) return e;
+    }
+    return null;
+  }
+
   function renderScoreboard(room) {
     const ul = el('game-scoreboard');
     ul.innerHTML = '';
     const isFinal = room.status === 'finished';
     const showChickenOutButtons = room.isPassAndPlay && state.isHost && room.status === 'active';
+    // A quick fix for the physical-dice race where someone chickens out the instant they see
+    // a bust coming, before the roller can enter it - the host can claw it back (or restore
+    // it, if they undo the wrong person) right from the player's own row, not just by digging
+    // through the event log.
+    const showUndoRedo = state.isHost && room.status === 'active';
     const sorted = [...room.players].sort((a, b) => b.totalScore - a.totalScore);
 
     let rank = 0;
@@ -532,11 +549,17 @@
       const chickenBtn = (showChickenOutButtons && p.activeThisRound)
         ? '<button type="button" class="btn-chicken-small">🐔 Out</button>'
         : '';
+      const lastChickenEvent = showUndoRedo ? findLastChickenOutEvent(room, p.id) : null;
+      const undoArmed = lastChickenEvent && isArmed('reverse', lastChickenEvent.id);
+      const undoBtn = lastChickenEvent
+        ? `<button type="button" class="btn-reverse${undoArmed ? ' confirming' : ''}" data-event-id="${lastChickenEvent.id}" title="${lastChickenEvent.reversed ? 'Redo their chicken-out' : 'Undo their chicken-out'}">${undoArmed ? 'Confirm?' : (lastChickenEvent.reversed ? '↺' : '↩')}</button>`
+        : '';
       li.innerHTML =
         rankBadge +
         `<span class="player-avatar" style="background:${avatarColor(p.id)}">${initial}</span>` +
         `<span class="player-name">${escapeHtml(p.name)}${p.isHost ? ' <span class="host-tag">Host</span>' : ''}${isTurn ? ' <span class="turn-tag">Turn</span>' : ''}</span>` +
         `<span class="score-value">${p.totalScore}</span>` +
+        undoBtn +
         chickenBtn;
       ul.appendChild(li);
     });
@@ -929,25 +952,41 @@
     });
   });
 
-  el('event-log').addEventListener('click', (e) => {
-    const btn = e.target.closest('.btn-reverse');
-    if (!btn) return;
-    const li = btn.closest('.event-log-item');
-    const eventId = li && li.dataset.eventId;
+  // The same ruling's undo/redo button can show in two places (the event log and the
+  // player's own scoreboard row) - both read the same eventId-keyed armedAction, so whichever
+  // one is tapped needs to refresh both surfaces to stay in sync.
+  function renderReverseUi() {
+    renderScoreboard(state.room);
+    renderEventLog(state.room);
+  }
+
+  function handleReverseClick(eventId) {
     if (!eventId) return;
 
     if (!isArmed('reverse', eventId)) {
-      arm('reverse', eventId, () => renderEventLog(state.room));
-      renderEventLog(state.room);
+      arm('reverse', eventId, renderReverseUi);
+      renderReverseUi();
       return;
     }
 
     disarm();
-    btn.disabled = true;
     socket.emit('host:reverseChickenOut', { eventId }, (res) => {
       if (!res || !res.ok) showToast((res && res.error) || 'Could not reverse that.', true);
-      renderEventLog(state.room);
+      renderReverseUi();
     });
+  }
+
+  el('event-log').addEventListener('click', (e) => {
+    const btn = e.target.closest('.btn-reverse');
+    if (!btn) return;
+    const li = btn.closest('.event-log-item');
+    handleReverseClick(li && li.dataset.eventId);
+  });
+
+  el('game-scoreboard').addEventListener('click', (e) => {
+    const btn = e.target.closest('.btn-reverse');
+    if (!btn) return;
+    handleReverseClick(btn.dataset.eventId);
   });
 
   el('btn-new-session').addEventListener('click', () => {

@@ -767,7 +767,7 @@ button { font-family: inherit; }
 
 .event-log-item .event-text { flex: 1; }
 
-.event-log-item .btn-reverse {
+.btn-reverse {
   flex-shrink: 0;
   border: none;
   background: var(--surface-2);
@@ -779,7 +779,7 @@ button { font-family: inherit; }
   cursor: pointer;
   white-space: nowrap;
 }
-.event-log-item .btn-reverse:hover { background: var(--border); }
+.btn-reverse:hover { background: var(--border); }
 
 .btn-reverse.confirming,
 .btn-kick.confirming {
