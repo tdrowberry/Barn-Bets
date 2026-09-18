@@ -3,7 +3,7 @@
   "appName": "Barn Bets",
   "webDir": "public",
   "server": {
-    "url": "https://chicken-out.onrender.com",
+    "url": "https://barn-bets.onrender.com",
     "androidScheme": "https"
   }
 }
