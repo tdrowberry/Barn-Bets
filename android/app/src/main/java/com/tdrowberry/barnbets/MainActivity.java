@@ -1,4 +1,4 @@
-package com.tdrowberry.chickenout;
+package com.tdrowberry.barnbets;
 
 import com.getcapacitor.BridgeActivity;
 

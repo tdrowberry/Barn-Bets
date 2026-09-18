@@ -921,3 +921,216 @@ button {
   white-space: nowrap;
 }
 .btn-chicken-small:hover { background: rgba(229, 72, 77, 0.22); }
+
+/* --- Hub game picker --- */
+
+.game-card-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.game-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+  background: var(--surface-2);
+  border: 2px solid var(--border);
+  border-radius: 16px;
+  padding: 18px 10px;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.game-card:hover { transform: translateY(-2px); border-color: var(--gold); box-shadow: var(--shadow-soft); }
+.game-card:active { transform: translateY(1px) scale(0.98); }
+
+.game-card-icon { font-size: 2.4rem; line-height: 1; }
+
+.game-card-name {
+  font-family: 'Fredoka', 'Nunito', sans-serif;
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--ink);
+}
+
+.game-card-tagline {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--ink-muted);
+  line-height: 1.3;
+}
+
+/* --- Shared mode-setup field grouping (host setup + lobby settings) --- */
+
+.mode-setup-fields {
+  padding: 14px;
+  margin-bottom: 18px;
+  background: var(--surface-2);
+  border-radius: 14px;
+}
+.mode-setup-fields label:last-child { margin-bottom: 0; }
+
+/* --- Shared in-game mode widgets --- */
+
+.stat-display {
+  text-align: center;
+  margin-bottom: 14px;
+}
+
+.stat-label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-muted);
+}
+
+.stat-value {
+  font-family: 'Fredoka', 'Nunito', sans-serif;
+  font-size: 2.4rem;
+  font-weight: 700;
+  color: var(--gold-dark);
+  line-height: 1;
+}
+
+.count-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.count-stepper span {
+  font-family: 'Fredoka', 'Nunito', sans-serif;
+  font-size: 1.4rem;
+  font-weight: 700;
+  min-width: 28px;
+  text-align: center;
+}
+
+/* N-slot tap-to-cycle physical dice entry, reused by Pigout/Quack Quack/Horse Race. */
+.dice-slots {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.dice-slot-btn {
+  width: 54px;
+  height: 54px;
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  font-family: 'Fredoka', 'Nunito', sans-serif;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--ink);
+  cursor: pointer;
+}
+.dice-slot-btn:active { transform: scale(0.95); }
+
+/* Quack Quack's current-roll selector and Horse Race's 5-die row share this tile grid. */
+.dice-select-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin: 10px 0 16px;
+}
+
+.die-tile {
+  width: 52px;
+  height: 52px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  font-family: 'Fredoka', 'Nunito', sans-serif;
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--ink);
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+}
+
+.die-tile.selected {
+  background: linear-gradient(135deg, var(--gold-light), var(--gold));
+  border-color: var(--gold-dark);
+  color: #3a2900;
+  transform: scale(1.06);
+}
+
+.die-tile.locked {
+  background: linear-gradient(135deg, #6ee7b7, var(--green-online));
+  border-color: #15803d;
+  color: #06331d;
+  cursor: default;
+}
+
+.die-tile.held {
+  opacity: 0.45;
+}
+
+.die-tile.disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.die-tile-role {
+  font-size: 0.55rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Horse Race's Ship / Captain / Crew checklist. */
+.sequence-checklist {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.sequence-slot {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 6px;
+  border: 2px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+
+.sequence-slot.complete {
+  border-color: var(--green-online);
+  background: rgba(34, 197, 94, 0.12);
+}
+
+.sequence-icon { font-size: 1.4rem; }
+
+.sequence-label {
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.sequence-check {
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--ink-muted);
+}
+
+.sequence-slot.complete .sequence-check { color: var(--green-online); }

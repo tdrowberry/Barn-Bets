@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <meta name="theme-color" content="#0b3d26">
-<meta name="description" content="Chicken - a push-your-luck dice game for a group in the same room.">
-<title>Chicken</title>
+<meta name="description" content="Barn Bets - a party pack of push-your-luck dice games for a group in the same room.">
+<title>Barn Bets</title>
 <link rel="icon" href="/img/logo.jpg">
 <link rel="apple-touch-icon" href="/img/logo.jpg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -15,20 +15,14 @@
 </head>
 <body>
 <div id="splash-screen" class="hidden">
-  <img src="/img/splash.jpg" alt="Chicken Out - Risk &amp; Luck Game">
+  <img src="/img/splash.jpg" alt="Barn Bets - a party pack of dice games">
 </div>
 
 <div id="how-to-play-modal" class="modal hidden">
   <div class="modal-backdrop" id="how-to-play-backdrop"></div>
   <div class="modal-card">
-    <h2>🐔 How to Play</h2>
-    <ul class="how-to-play-list">
-      <li><strong>Take turns rolling</strong> two dice (or tap Roll Dice in virtual mode). Every roll adds to the shared pot.</li>
-      <li>The first few rolls each round are <strong>safe</strong> — even a 7 just adds a bonus 70 to the pot.</li>
-      <li>After that, it's <strong>live</strong>: a 7 busts the round and the pot is lost for everyone still in, but a double instantly <strong>doubles</strong> the pot instead.</li>
-      <li>Tap <strong>🐔 Chicken Out</strong> anytime to lock in the current pot as your score — but you're done for that round.</li>
-      <li>After all the rounds, whoever has the <strong>highest total score</strong> wins!</li>
-    </ul>
+    <h2 id="how-to-play-title">🎲 How to Play</h2>
+    <ul class="how-to-play-list" id="how-to-play-list"></ul>
     <button id="btn-close-how-to-play" class="btn-primary" type="button">Got it!</button>
   </div>
 </div>
@@ -36,28 +30,114 @@
 <div id="app">
   <header class="app-header">
     <button id="btn-how-to-play" class="how-to-play-btn" type="button">❓ How to Play</button>
-    <h1><img class="logo-icon" src="/img/logo.jpg" alt="">Chicken</h1>
-    <p class="app-tagline">Push your luck</p>
+    <h1><img class="logo-icon" src="/img/logo.jpg" alt="">Barn Bets</h1>
+    <p class="app-tagline">Pick a game, place your bets</p>
   </header>
 
-  <section id="screen-landing" class="screen">
-    <button id="btn-host" class="btn-primary">Host a Game</button>
-    <button id="btn-join" class="btn-secondary">Join a Game</button>
-    <button id="btn-pass-play" class="btn-tertiary">One Phone Play</button>
+  <section id="screen-hub" class="screen">
+    <h2>Choose a game</h2>
+    <div class="game-card-grid" id="hub-game-grid"></div>
+  </section>
+
+  <section id="screen-mode-landing" class="screen hidden">
+    <h2 id="mode-landing-title">Chicken Out</h2>
+    <p class="hint" id="mode-landing-tagline"></p>
+    <button id="btn-mode-host" class="btn-primary">Host a Game</button>
+    <button id="btn-mode-join" class="btn-secondary">Join a Game</button>
+    <button id="btn-mode-pass-play" class="btn-tertiary">One Phone Play</button>
+    <button class="btn-link" data-back="screen-hub" type="button">‹ Back to games</button>
   </section>
 
   <section id="screen-host-setup" class="screen hidden">
     <h2 id="host-setup-title">Host a Game</h2>
-    <p class="hint hidden" id="pass-play-hint">One phone for the whole group — add everyone in the lobby. With physical dice, one person just taps in each roll as it happens around the table. With virtual dice, pass the phone so each player taps Roll Dice on their own turn.</p>
+    <p class="hint hidden" id="pass-play-hint">One phone for the whole group — add everyone in the lobby. With physical dice, one person just taps in each roll as it happens around the table. With virtual dice, pass the phone so each player takes their own turn.</p>
     <label>Your name
       <input type="text" id="host-name" maxlength="24" autocomplete="off" placeholder="Your name">
     </label>
-    <label>Rounds (5–35)
-      <input type="number" id="host-rounds" min="5" max="35" value="10" autocomplete="off">
-    </label>
-    <label>Starting rolls (1–5)
-      <input type="number" id="host-starting-rolls" min="1" max="5" value="3" autocomplete="off">
-    </label>
+
+    <div id="setup-chickenout" class="mode-setup-fields hidden">
+      <label>Rounds (5–35)
+        <input type="number" id="setup-chickenout-rounds" min="5" max="35" value="10" autocomplete="off">
+      </label>
+      <label>Starting rolls (1–5)
+        <input type="number" id="setup-chickenout-startingRolls" min="1" max="5" value="3" autocomplete="off">
+      </label>
+    </div>
+
+    <div id="setup-pigout" class="mode-setup-fields hidden">
+      <label>Target score (50–500)
+        <input type="number" id="setup-pigout-targetScore" min="50" max="500" value="100" autocomplete="off">
+      </label>
+      <label class="checkbox-row" id="setup-pigout-hog-row">
+        <input type="checkbox" id="setup-pigout-hogModeEnabled">
+        <span>Hog rule — choose how many dice to roll each turn</span>
+      </label>
+      <div id="setup-pigout-hog-fields" class="hidden">
+        <label>Max dice for Hog rolls (2–6)
+          <input type="number" id="setup-pigout-hogMaxDice" min="2" max="6" value="6" autocomplete="off">
+        </label>
+      </div>
+      <div id="setup-pigout-fixed-fields">
+        <label>Dice count
+          <select id="setup-pigout-diceCount">
+            <option value="1">1 die (classic Pig)</option>
+            <option value="2">2 dice</option>
+          </select>
+        </label>
+        <div id="setup-pigout-twodice-fields" class="hidden">
+          <label>Snake-eyes penalty (rolling two 1s)
+            <select id="setup-pigout-doubleOnesPenalty">
+              <option value="reset-score">Reset entire score to 0</option>
+              <option value="flat-bonus">+25 bonus instead (doesn't end turn)</option>
+            </select>
+          </label>
+          <label class="checkbox-row">
+            <input type="checkbox" id="setup-pigout-doublesBonus">
+            <span>Doubles double the roll's value (e.g. 4-4 scores 16)</span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div id="setup-quackquack" class="mode-setup-fields hidden">
+      <label>Target score (3,000–15,000)
+        <input type="number" id="setup-quackquack-targetScore" min="3000" max="15000" step="500" value="10000" autocomplete="off">
+      </label>
+      <label>4/5/6-of-a-kind scoring
+        <select id="setup-quackquack-scoringScheme">
+          <option value="flat">Flat (1000 / 2000 / 3000)</option>
+          <option value="doubling">Doubling (doubles each extra die)</option>
+        </select>
+      </label>
+      <label class="checkbox-row" id="setup-quackquack-minopen-row">
+        <input type="checkbox" id="setup-quackquack-minOpeningScoreEnabled">
+        <span>Require a minimum opening score</span>
+      </label>
+      <div id="setup-quackquack-minopen-fields" class="hidden">
+        <label>Minimum opening score
+          <input type="number" id="setup-quackquack-minOpeningScoreValue" min="100" max="5000" step="50" value="500" autocomplete="off">
+        </label>
+      </div>
+    </div>
+
+    <div id="setup-horserace" class="mode-setup-fields hidden">
+      <label>Rounds (5–35)
+        <input type="number" id="setup-horserace-numberOfRounds" min="5" max="35" value="10" autocomplete="off">
+      </label>
+      <label>Win condition
+        <select id="setup-horserace-winCondition">
+          <option value="highestCumulative">Highest cumulative cargo score</option>
+          <option value="mostRoundWins">Most rounds won</option>
+        </select>
+      </label>
+      <label>Tie-break
+        <select id="setup-horserace-tieBreak">
+          <option value="suddenDeathReroll">Sudden-death reroll</option>
+          <option value="sharedWin">Shared win</option>
+        </select>
+      </label>
+    </div>
+
     <label>Dice mode
       <select id="host-dice-mode">
         <option value="physical">Physical (report your own dice)</option>
@@ -70,7 +150,7 @@
     </label>
     <p class="error-text hidden" id="host-setup-error"></p>
     <button id="btn-create-room" class="btn-primary">🎲 Create Room</button>
-    <button class="btn-link" data-back="screen-landing" type="button">‹ Back</button>
+    <button class="btn-link" data-back="screen-mode-landing" type="button">‹ Back</button>
   </section>
 
   <section id="screen-join" class="screen hidden">
@@ -83,11 +163,11 @@
     </label>
     <p class="error-text hidden" id="join-error"></p>
     <button id="btn-join-room" class="btn-primary">🚪 Join</button>
-    <button class="btn-link" data-back="screen-landing" type="button">‹ Back</button>
+    <button class="btn-link" data-back="screen-hub" type="button">‹ Back</button>
   </section>
 
   <section id="screen-lobby" class="screen hidden">
-    <h2>Lobby</h2>
+    <h2 id="lobby-title">Lobby</h2>
     <div class="room-code-display">Room code <span class="room-code-badge" id="lobby-room-code">----</span></div>
 
     <div id="lobby-join-section">
@@ -102,12 +182,89 @@
     <h3>Game settings</h3>
     <p class="hint hidden" id="lobby-settings-hint">Only the host can change these.</p>
     <div class="lobby-settings-form" id="lobby-settings-form">
-      <label>Rounds (5–35)
-        <input type="number" id="lobby-rounds" min="5" max="35">
-      </label>
-      <label>Starting rolls (1–5)
-        <input type="number" id="lobby-starting-rolls" min="1" max="5">
-      </label>
+      <div id="lobby-setup-chickenout" class="mode-setup-fields hidden">
+        <label>Rounds (5–35)
+          <input type="number" id="lobby-chickenout-rounds" min="5" max="35">
+        </label>
+        <label>Starting rolls (1–5)
+          <input type="number" id="lobby-chickenout-startingRolls" min="1" max="5">
+        </label>
+      </div>
+
+      <div id="lobby-setup-pigout" class="mode-setup-fields hidden">
+        <label>Target score (50–500)
+          <input type="number" id="lobby-pigout-targetScore" min="50" max="500">
+        </label>
+        <label class="checkbox-row">
+          <input type="checkbox" id="lobby-pigout-hogModeEnabled">
+          <span>Hog rule — choose how many dice to roll each turn</span>
+        </label>
+        <div id="lobby-pigout-hog-fields" class="hidden">
+          <label>Max dice for Hog rolls (2–6)
+            <input type="number" id="lobby-pigout-hogMaxDice" min="2" max="6">
+          </label>
+        </div>
+        <div id="lobby-pigout-fixed-fields">
+          <label>Dice count
+            <select id="lobby-pigout-diceCount">
+              <option value="1">1 die (classic Pig)</option>
+              <option value="2">2 dice</option>
+            </select>
+          </label>
+          <div id="lobby-pigout-twodice-fields" class="hidden">
+            <label>Snake-eyes penalty
+              <select id="lobby-pigout-doubleOnesPenalty">
+                <option value="reset-score">Reset entire score to 0</option>
+                <option value="flat-bonus">+25 bonus instead</option>
+              </select>
+            </label>
+            <label class="checkbox-row">
+              <input type="checkbox" id="lobby-pigout-doublesBonus">
+              <span>Doubles double the roll's value</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div id="lobby-setup-quackquack" class="mode-setup-fields hidden">
+        <label>Target score (3,000–15,000)
+          <input type="number" id="lobby-quackquack-targetScore" min="3000" max="15000" step="500">
+        </label>
+        <label>4/5/6-of-a-kind scoring
+          <select id="lobby-quackquack-scoringScheme">
+            <option value="flat">Flat (1000 / 2000 / 3000)</option>
+            <option value="doubling">Doubling</option>
+          </select>
+        </label>
+        <label class="checkbox-row">
+          <input type="checkbox" id="lobby-quackquack-minOpeningScoreEnabled">
+          <span>Require a minimum opening score</span>
+        </label>
+        <div id="lobby-quackquack-minopen-fields" class="hidden">
+          <label>Minimum opening score
+            <input type="number" id="lobby-quackquack-minOpeningScoreValue" min="100" max="5000" step="50">
+          </label>
+        </div>
+      </div>
+
+      <div id="lobby-setup-horserace" class="mode-setup-fields hidden">
+        <label>Rounds (5–35)
+          <input type="number" id="lobby-horserace-numberOfRounds" min="5" max="35">
+        </label>
+        <label>Win condition
+          <select id="lobby-horserace-winCondition">
+            <option value="highestCumulative">Highest cumulative cargo score</option>
+            <option value="mostRoundWins">Most rounds won</option>
+          </select>
+        </label>
+        <label>Tie-break
+          <select id="lobby-horserace-tieBreak">
+            <option value="suddenDeathReroll">Sudden-death reroll</option>
+            <option value="sharedWin">Shared win</option>
+          </select>
+        </label>
+      </div>
+
       <label>Dice mode
         <select id="lobby-dice-mode">
           <option value="physical">Physical (report your own dice)</option>
@@ -136,44 +293,118 @@
 
   <section id="screen-game" class="screen hidden">
     <div class="game-topbar">
-      <div class="pot-display">
-        <span class="pot-label">Pot</span>
-        <span class="pot-value" id="game-pot">0</span>
-      </div>
-      <div class="round-info" id="game-round-info">Round 1 of 10 · Roll 1</div>
+      <div class="round-info" id="game-round-info"></div>
     </div>
-
-    <p class="phase-banner" id="game-phase-banner">Starting rolls — safe from a bust</p>
+    <p class="phase-banner hidden" id="game-phase-banner"></p>
     <p class="roll-toast hidden" id="roll-toast"></p>
     <h2 class="turn-indicator" id="game-turn-indicator">Waiting…</h2>
     <p class="hint" id="game-status-hint" style="text-align:center;"></p>
 
-    <button id="btn-chicken-out" class="btn-danger" type="button" disabled><img class="chicken-out-icon" src="/img/chicken-out-icon.png" alt="">Chicken Out</button>
-
-    <div id="game-physical-panel" class="hidden">
-      <div class="dice-grid" id="dice-grid">
-        <button type="button" class="dice-btn" data-value="2" disabled>2</button>
-        <button type="button" class="dice-btn" data-value="3" disabled>3</button>
-        <button type="button" class="dice-btn" data-value="4" disabled>4</button>
-        <button type="button" class="dice-btn" data-value="5" disabled>5</button>
-        <button type="button" class="dice-btn" data-value="6" disabled>6</button>
-        <button type="button" class="dice-btn" data-value="7" disabled>7</button>
-        <button type="button" class="dice-btn" data-value="8" disabled>8</button>
-        <button type="button" class="dice-btn" data-value="9" disabled>9</button>
-        <button type="button" class="dice-btn" data-value="10" disabled>10</button>
-        <button type="button" class="dice-btn" data-value="11" disabled>11</button>
-        <button type="button" class="dice-btn" data-value="12" disabled>12</button>
-        <button type="button" class="dice-btn dice-btn-double" id="double-btn" disabled>×2</button>
+    <div id="play-chickenout" class="mode-play hidden">
+      <div class="game-topbar">
+        <div class="pot-display"><span class="pot-label">Pot</span><span class="pot-value" id="game-pot">0</span></div>
       </div>
-      <button id="btn-confirm-roll" class="btn-primary hidden" type="button" disabled>Confirm Roll</button>
+      <button id="btn-chicken-out" class="btn-danger" type="button" disabled><img class="chicken-out-icon" src="/img/chicken-out-icon.png" alt="">Chicken Out</button>
+
+      <div id="game-physical-panel" class="hidden">
+        <div class="dice-grid" id="dice-grid">
+          <button type="button" class="dice-btn" data-value="2" disabled>2</button>
+          <button type="button" class="dice-btn" data-value="3" disabled>3</button>
+          <button type="button" class="dice-btn" data-value="4" disabled>4</button>
+          <button type="button" class="dice-btn" data-value="5" disabled>5</button>
+          <button type="button" class="dice-btn" data-value="6" disabled>6</button>
+          <button type="button" class="dice-btn" data-value="7" disabled>7</button>
+          <button type="button" class="dice-btn" data-value="8" disabled>8</button>
+          <button type="button" class="dice-btn" data-value="9" disabled>9</button>
+          <button type="button" class="dice-btn" data-value="10" disabled>10</button>
+          <button type="button" class="dice-btn" data-value="11" disabled>11</button>
+          <button type="button" class="dice-btn" data-value="12" disabled>12</button>
+          <button type="button" class="dice-btn dice-btn-double" id="double-btn" disabled>×2</button>
+        </div>
+        <button id="btn-confirm-roll" class="btn-primary hidden" type="button" disabled>Confirm Roll</button>
+      </div>
+
+      <div id="game-virtual-panel" class="hidden">
+        <div class="dice-animation" id="dice-animation">🎲</div>
+        <button id="btn-roll-dice" class="btn-primary" type="button" disabled>🎲 Roll Dice</button>
+      </div>
     </div>
 
-    <div id="game-virtual-panel" class="hidden">
-      <div class="dice-animation" id="dice-animation">🎲</div>
-      <button id="btn-roll-dice" class="btn-primary" type="button" disabled>🎲 Roll Dice</button>
+    <div id="play-pigout" class="mode-play hidden">
+      <div class="stat-display"><span class="stat-label">Turn total</span><span class="stat-value" id="pig-turn-total">0</span></div>
+
+      <div id="pig-hog-picker" class="hidden">
+        <p class="hint">Dice to roll (1–<span id="pig-hog-max">6</span>)</p>
+        <div class="count-stepper">
+          <button type="button" id="pig-hog-minus" class="btn-small">−</button>
+          <span id="pig-hog-count">1</span>
+          <button type="button" id="pig-hog-plus" class="btn-small">+</button>
+        </div>
+      </div>
+
+      <div id="pig-physical-panel" class="hidden">
+        <div id="pig-dice-slots" class="dice-slots"></div>
+        <button id="btn-pig-submit-roll" class="btn-primary" type="button" disabled>Submit Roll</button>
+      </div>
+      <div id="pig-virtual-panel" class="hidden">
+        <div class="dice-animation" id="pig-dice-animation">🎲</div>
+        <button id="btn-pig-roll" class="btn-primary" type="button" disabled>🎲 Roll</button>
+      </div>
+
+      <button id="btn-pig-bank" class="btn-secondary" type="button" disabled>💰 Bank</button>
     </div>
 
-    <h3><img class="coop-icon" src="/img/coop-icon.jpg" alt="">Coop</h3>
+    <div id="play-quackquack" class="mode-play hidden">
+      <div class="game-topbar">
+        <div class="stat-display"><span class="stat-label">Turn total</span><span class="stat-value" id="quack-turn-total">0</span></div>
+        <div class="round-info" id="quack-dice-in-play-hint">6 dice in play</div>
+      </div>
+
+      <div id="quack-physical-panel" class="hidden">
+        <div id="quack-dice-slots" class="dice-slots"></div>
+        <button id="btn-quack-submit-roll" class="btn-primary" type="button" disabled>Submit Roll</button>
+      </div>
+      <div id="quack-virtual-panel" class="hidden">
+        <div class="dice-animation" id="quack-dice-animation">🎲</div>
+        <button id="btn-quack-roll" class="btn-primary" type="button" disabled>🎲 Roll</button>
+      </div>
+
+      <div id="quack-selection-panel" class="hidden">
+        <p class="hint">Tap the dice to set aside, then confirm.</p>
+        <div id="quack-current-roll" class="dice-select-row"></div>
+        <button id="btn-quack-confirm-selection" class="btn-primary" type="button" disabled>Set Aside Selected</button>
+      </div>
+
+      <button id="btn-quack-bank" class="btn-secondary" type="button" disabled>💰 Bank</button>
+    </div>
+
+    <div id="play-horserace" class="mode-play hidden">
+      <div class="sequence-checklist" id="horse-checklist">
+        <div class="sequence-slot" data-role="ship">
+          <span class="sequence-icon">🚢</span><span class="sequence-label">Ship (6)</span><span class="sequence-check">—</span>
+        </div>
+        <div class="sequence-slot" data-role="captain">
+          <span class="sequence-icon">🧑‍✈️</span><span class="sequence-label">Captain (5)</span><span class="sequence-check">—</span>
+        </div>
+        <div class="sequence-slot" data-role="crew">
+          <span class="sequence-icon">⚓</span><span class="sequence-label">Crew (4)</span><span class="sequence-check">—</span>
+        </div>
+      </div>
+      <p class="hint" id="horse-rolls-left">Rolls left: 3</p>
+      <p class="hint" id="horse-hold-hint">Tap a die showing the number you need to lock it in. Tap any other die to hold it back from your next roll.</p>
+
+      <div id="horse-dice-row" class="dice-select-row"></div>
+
+      <div id="horse-physical-panel" class="hidden">
+        <div id="horse-dice-slots" class="dice-slots"></div>
+        <button id="btn-horse-submit-roll" class="btn-primary" type="button" disabled>Submit Roll</button>
+      </div>
+      <div id="horse-virtual-panel" class="hidden">
+        <button id="btn-horse-roll" class="btn-primary" type="button" disabled>🎲 Roll</button>
+      </div>
+    </div>
+
+    <h3><img class="coop-icon" src="/img/coop-icon.jpg" alt="">Scoreboard</h3>
     <ul id="game-scoreboard" class="player-list"></ul>
 
     <button id="btn-new-session" class="btn-primary hidden" type="button">🔄 Start New Session (Same Players)</button>
@@ -188,7 +419,7 @@
     <div id="host-controls" class="host-controls hidden">
       <button id="btn-toggle-host-controls" class="host-controls-toggle" type="button">⚙️ Host Controls</button>
       <div id="host-controls-panel" class="host-controls-panel hidden">
-        <button id="btn-undo-roll" class="btn-host" type="button">↩️ Undo Last Roll</button>
+        <button id="btn-undo-roll" class="btn-host" type="button">↩️ Undo Last Action</button>
         <button id="btn-end-game" class="btn-danger" type="button">🏁 End Game</button>
 
         <p class="hint">Late players can still join with the same QR code or link — they'll start at zero, active next round.</p>
@@ -207,6 +438,11 @@
 
 <script src="/js/vendor/qrcode.min.js"></script>
 <script src="/socket.io/socket.io.js"></script>
+<script src="/js/core.js"></script>
+<script src="/js/modes/chickenOut.js"></script>
+<script src="/js/modes/pigout.js"></script>
+<script src="/js/modes/quackQuack.js"></script>
+<script src="/js/modes/horseRace.js"></script>
 <script src="/js/app.js"></script>
 </body>
 </html>

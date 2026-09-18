@@ -15,6 +15,22 @@ function broadcastRoom(room) {
   io.to(room.code).emit('room:update', rooms.getRoomSnapshot(room));
 }
 
+// Every mode-specific player action (roll, bank, lock, select dice, ...) shares this exact
+// reply/broadcast shape, so one wrapper handles all of them instead of repeating it per event.
+function registerAction(io, socket, eventName, actionName) {
+  socket.on(eventName, (payload, ack) => {
+    const reply = typeof ack === 'function' ? ack : () => {};
+    const room = rooms.getRoom(socket.data.roomCode);
+    if (!room) return reply({ ok: false, error: 'Room not found.' });
+
+    const result = rooms.performAction(room, socket.data.playerId, actionName, payload || {});
+    if (result.error) return reply({ ok: false, error: result.error });
+
+    reply({ ok: true, room: rooms.getRoomSnapshot(room) });
+    broadcastRoom(room);
+  });
+}
+
 io.on('connection', (socket) => {
   socket.on('host:createRoom', (payload, ack) => {
     const reply = typeof ack === 'function' ? ack : () => {};
@@ -96,48 +112,33 @@ io.on('connection', (socket) => {
     broadcastRoom(room);
   });
 
-  socket.on('player:submitRoll', (payload, ack) => {
-    const reply = typeof ack === 'function' ? ack : () => {};
-    const room = rooms.getRoom(socket.data.roomCode);
-    if (!room) return reply({ ok: false, error: 'Room not found.' });
+  // Chicken Out
+  registerAction(io, socket, 'player:submitRoll', 'submitRoll');
+  registerAction(io, socket, 'player:chickenOut', 'chickenOut');
+  registerAction(io, socket, 'host:reverseChickenOut', 'reverseChickenOut');
 
-    const result = rooms.submitRoll(room, socket.data.playerId, payload || {});
-    if (result.error) return reply({ ok: false, error: result.error });
+  // Pigout
+  registerAction(io, socket, 'player:pigRoll', 'roll');
+  registerAction(io, socket, 'player:pigReportRoll', 'reportRoll');
+  registerAction(io, socket, 'player:pigBank', 'bank');
 
-    reply({ ok: true, room: rooms.getRoomSnapshot(room) });
-    broadcastRoom(room);
-  });
+  // Quack Quack
+  registerAction(io, socket, 'player:quackRoll', 'roll');
+  registerAction(io, socket, 'player:quackReportRoll', 'reportRoll');
+  registerAction(io, socket, 'player:quackSelectDice', 'selectDice');
+  registerAction(io, socket, 'player:quackBank', 'bank');
 
-  socket.on('player:chickenOut', (payload, ack) => {
-    const reply = typeof ack === 'function' ? ack : () => {};
-    const room = rooms.getRoom(socket.data.roomCode);
-    if (!room) return reply({ ok: false, error: 'Room not found.' });
-
-    const result = rooms.chickenOut(room, socket.data.playerId, payload || {});
-    // Always reply + broadcast, even on rejection: a "too late" rejection still logs an
-    // event everyone needs to see for the race condition to make sense as a paper trail.
-    reply({ ok: !result.error, error: result.error, room: rooms.getRoomSnapshot(room) });
-    broadcastRoom(room);
-  });
+  // Horse Race
+  registerAction(io, socket, 'player:horseRoll', 'roll');
+  registerAction(io, socket, 'player:horseReportRoll', 'reportRoll');
+  registerAction(io, socket, 'player:horseLock', 'lock');
 
   socket.on('host:undoLastRoll', (payload, ack) => {
     const reply = typeof ack === 'function' ? ack : () => {};
     const room = rooms.getRoom(socket.data.roomCode);
     if (!room) return reply({ ok: false, error: 'Room not found.' });
 
-    const result = rooms.undoLastRoll(room, socket.data.playerId);
-    if (result.error) return reply({ ok: false, error: result.error });
-
-    reply({ ok: true, room: rooms.getRoomSnapshot(room) });
-    broadcastRoom(room);
-  });
-
-  socket.on('host:reverseChickenOut', (payload, ack) => {
-    const reply = typeof ack === 'function' ? ack : () => {};
-    const room = rooms.getRoom(socket.data.roomCode);
-    if (!room) return reply({ ok: false, error: 'Room not found.' });
-
-    const result = rooms.reverseChickenOut(room, socket.data.playerId, (payload || {}).eventId);
+    const result = rooms.undoLastAction(room, socket.data.playerId);
     if (result.error) return reply({ ok: false, error: result.error });
 
     reply({ ok: true, room: rooms.getRoomSnapshot(room) });
@@ -244,7 +245,7 @@ function getLikelyLanUrls(port) {
 
 const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, () => {
-  console.log(`Chicken server running on port ${PORT}`);
+  console.log(`Barn Bets server running on port ${PORT}`);
   console.log(`  Local:   http://localhost:${PORT}`);
   const lanUrls = getLikelyLanUrls(PORT);
   if (lanUrls.length) {

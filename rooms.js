@@ -1,16 +1,12 @@
 const crypto = require('crypto');
+const { logEvent } = require('./modes/shared');
+const { getMode } = require('./modes');
 
 // In-memory room store. No database - state lives here for the life of the process.
 const rooms = new Map();
 
 const ROOM_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I, easier to read aloud
 const NAME_MAX_LEN = 24;
-
-function clampInt(value, min, max, fallback) {
-  const n = parseInt(value, 10);
-  if (Number.isNaN(n)) return fallback;
-  return Math.min(max, Math.max(min, n));
-}
 
 function cleanName(name) {
   if (typeof name !== 'string') return '';
@@ -28,28 +24,16 @@ function generateRoomCode() {
   return code;
 }
 
-function logEvent(room, type, playerId, payload = {}) {
-  const event = {
-    id: crypto.randomUUID(),
-    type,
-    playerId,
-    payload,
-    serverTimestamp: Date.now(),
-  };
-  room.events.push(event);
-  return event;
-}
-
-function createPlayer(name, isHost) {
+function createPlayer(name, isHost, mode) {
   return {
     id: crypto.randomUUID(),
     name,
     isHost,
-    totalScore: 0,
     activeThisRound: true,
     connected: true,
     socketId: null,
     joinedAt: Date.now(),
+    modeState: mode.initPlayerModeState(),
   };
 }
 
@@ -58,34 +42,31 @@ function getRoom(code) {
   return rooms.get(code.toUpperCase()) || null;
 }
 
-function createRoom({ hostName, rounds, startingRolls, diceMode, confirmRolls, passAndPlay }) {
+function createRoom({ hostName, gameMode, diceMode, confirmRolls, passAndPlay, ...rawConfig }) {
   const name = cleanName(hostName);
   if (!name) return { error: 'Enter your name.' };
 
-  const roundsTotal = clampInt(rounds, 5, 35, 10);
-  const startingRollsClamped = clampInt(startingRolls, 1, 5, 3);
-  const mode = diceMode === 'virtual' ? 'virtual' : 'physical';
+  const mode = getMode(gameMode);
+  if (!mode) return { error: 'Unknown game.' };
 
-  const host = createPlayer(name, true);
+  const host = createPlayer(name, true, mode);
   const code = generateRoomCode();
 
   const room = {
     code,
     hostId: host.id,
-    roundsTotal,
-    startingRolls: startingRollsClamped,
-    diceMode: mode,
+    gameMode: mode.key,
+    diceMode: diceMode === 'virtual' ? 'virtual' : 'physical',
     confirmRolls: !!confirmRolls, // physical mode only; default is auto-submit on tap
-    isPassAndPlay: !!passAndPlay, // one shared device speaks for every player - see submitRoll/chickenOut
+    isPassAndPlay: !!passAndPlay, // one shared device speaks for every player
+    config: mode.clampConfig(rawConfig, mode.defaultConfig()),
     status: 'lobby', // lobby | active | finished
-    currentRound: 0,
-    rollCountThisRound: 0,
-    pot: 0,
     turnOrder: [host.id],
     turnIndex: 0,
     players: new Map([[host.id, host]]),
     events: [],
     endedEarly: false,
+    modeState: {},
     createdAt: Date.now(),
   };
 
@@ -105,7 +86,8 @@ function addLocalPlayer(room, hostId, name) {
   const cleaned = cleanName(name);
   if (!cleaned) return { error: 'Enter a name.' };
 
-  const player = createPlayer(cleaned, false);
+  const mode = getMode(room.gameMode);
+  const player = createPlayer(cleaned, false, mode);
   const late = room.status === 'active';
   if (late) player.activeThisRound = false;
 
@@ -123,10 +105,10 @@ function joinRoom({ roomCode, name }) {
   const cleaned = cleanName(name);
   if (!cleaned) return { error: 'Enter your name.' };
 
-  const player = createPlayer(cleaned, false);
+  const mode = getMode(room.gameMode);
+  const player = createPlayer(cleaned, false, mode);
   // Joining mid-session (the host re-shares the link/QR for a latecomer): they're seated
-  // at zero points but sit out the round in progress, same as chickening out would leave
-  // them - the next round's blanket reactivation brings them in automatically.
+  // at zero points but sit out the round in progress, active from the next one.
   const late = room.status === 'active';
   if (late) player.activeThisRound = false;
 
@@ -165,321 +147,29 @@ function startGame(room, playerId) {
   if (room.status !== 'lobby') return { error: 'Game already started.' };
   if (room.turnOrder.length < 1) return { error: 'Need at least one player.' };
 
+  const mode = getMode(room.gameMode);
   room.status = 'active';
-  room.currentRound = 1;
-  room.rollCountThisRound = 0;
-  room.pot = 0;
   room.turnIndex = 0;
   room.endedEarly = false;
-  for (const p of room.players.values()) p.activeThisRound = true;
+  mode.onGameStart(room);
 
   logEvent(room, 'hostOverride', playerId, { action: 'startGame' });
   return { room };
 }
 
-const DOUBLE_ELIGIBLE_SUMS = new Set([2, 4, 6, 8, 10, 12]);
-
-function isValidSum(sum) {
-  return Number.isInteger(sum) && sum >= 2 && sum <= 12;
+// Every mode-specific player action (roll, bank, lock, chicken out, ...) routes through here,
+// so server.js's socket handlers stay a thin, uniform "look up room, dispatch, broadcast"
+// shape regardless of which game is running.
+function performAction(room, playerId, actionName, payload) {
+  const mode = getMode(room.gameMode);
+  const action = mode.actions[actionName];
+  if (!action) return { error: 'Unknown action.' };
+  return action(room, playerId, payload || {});
 }
 
-function rollDie() {
-  return 1 + Math.floor(Math.random() * 6);
-}
-
-// Turn passes to the next ACTIVE player, wrapping around turnOrder.
-function nextActiveIndex(room, fromIndex) {
-  const n = room.turnOrder.length;
-  for (let step = 1; step <= n; step++) {
-    const idx = (fromIndex + step) % n;
-    const player = room.players.get(room.turnOrder[idx]);
-    if (player && player.activeThisRound) return idx;
-  }
-  return fromIndex;
-}
-
-// Captures everything a roll can change, so a host undo can restore it exactly.
-function snapshotRoundState(room) {
-  const activeThisRound = {};
-  for (const [id, p] of room.players) activeThisRound[id] = p.activeThisRound;
-  return {
-    pot: room.pot,
-    rollCountThisRound: room.rollCountThisRound,
-    currentRound: room.currentRound,
-    turnIndex: room.turnIndex,
-    status: room.status,
-    activeThisRound,
-  };
-}
-
-function restoreRoundState(room, snap) {
-  room.pot = snap.pot;
-  room.rollCountThisRound = snap.rollCountThisRound;
-  room.currentRound = snap.currentRound;
-  room.turnIndex = snap.turnIndex;
-  room.status = snap.status;
-  for (const [id, active] of Object.entries(snap.activeThisRound)) {
-    const p = room.players.get(id);
-    if (p) p.activeThisRound = active;
-  }
-}
-
-// Resets round state and either advances to the next round or ends the session.
-function startNewRound(room, afterIndex) {
-  room.currentRound += 1;
-  if (room.currentRound > room.roundsTotal) {
-    room.status = 'finished';
-    return;
-  }
-  room.pot = 0;
-  room.rollCountThisRound = 0;
-  for (const p of room.players.values()) p.activeThisRound = true;
-  room.turnIndex = (afterIndex + 1) % room.turnOrder.length;
-}
-
-function submitRoll(room, playerId, payload) {
-  if (room.status !== 'active') return { error: 'Game is not active.' };
-
-  const currentPlayerId = room.turnOrder[room.turnIndex];
-  // Pass-and-play's one shared device speaks for every player, so its own playerId will
-  // almost never match whoever's actual turn it is - the room is the authority on who's up,
-  // not which socket asked. Scoped to the HOST's socket specifically (not just "this room
-  // happens to be pass-and-play") so a guest who joined a pass-and-play room by normal link
-  // can't act as anyone but themselves.
-  const isPassAndPlayHost = room.isPassAndPlay && playerId === room.hostId;
-  const actingPlayerId = isPassAndPlayHost ? currentPlayerId : playerId;
-  if (!isPassAndPlayHost && playerId !== currentPlayerId) return { error: 'Not your turn.' };
-
-  const player = room.players.get(actingPlayerId);
-  if (!player || !player.activeThisRound) return { error: 'You are not active this round.' };
-
-  const preState = snapshotRoundState(room);
-  const inStartingPhase = (room.rollCountThisRound + 1) <= room.startingRolls;
-
-  let sum = null;
-  let isDouble;
-  let dice = null;
-
-  if (room.diceMode === 'virtual') {
-    const d1 = rollDie();
-    const d2 = rollDie();
-    dice = [d1, d2];
-    sum = d1 + d2;
-    isDouble = d1 === d2;
-  } else {
-    isDouble = !!(payload && payload.isDouble);
-    const claimedSum = payload && payload.sum;
-    const hasSum = isValidSum(claimedSum);
-
-    if (isDouble && !inStartingPhase) {
-      // Live-phase double: the pot just doubles no matter which double it was, so the ×2
-      // button is a complete submission on its own - a sum is optional, not required.
-      if (hasSum) {
-        sum = claimedSum;
-        if (!DOUBLE_ELIGIBLE_SUMS.has(sum)) return { error: 'That sum cannot be a double.' };
-      }
-    } else {
-      // Every other case needs a real sum: plain rolls always, and a starting-phase double
-      // too, since it just adds its sum like any other roll there.
-      if (!hasSum) return { error: 'Invalid roll.' };
-      sum = claimedSum;
-      if (isDouble && !DOUBLE_ELIGIBLE_SUMS.has(sum)) return { error: 'That sum cannot be a double.' };
-    }
-  }
-
-  room.rollCountThisRound += 1;
-  let busted = false;
-  let potDoubled = false;
-  const potBeforeThisRoll = room.pot;
-
-  if (inStartingPhase) {
-    room.pot += (sum === 7) ? 70 : sum;
-  } else if (sum === 7) {
-    busted = true;
-    room.pot = 0;
-  } else if (isDouble) {
-    room.pot *= 2;
-    potDoubled = true;
-  } else {
-    room.pot += sum;
-  }
-
-  logEvent(room, 'roll', actingPlayerId, {
-    sum,
-    isDouble,
-    dice,
-    diceMode: room.diceMode,
-    inStartingPhase,
-    busted,
-    potDoubled,
-    potAfter: room.pot,
-    preState, // internal only - stripped before this reaches any client
-  });
-
-  const busterIndex = room.turnIndex;
-
-  if (busted) {
-    logEvent(room, 'bust', actingPlayerId, { round: room.currentRound, potLost: potBeforeThisRoll });
-    startNewRound(room, busterIndex);
-  } else {
-    room.turnIndex = nextActiveIndex(room, room.turnIndex);
-  }
-
-  return { room };
-}
-
-// Reverts the most recent roll (and the bust it may have caused) using the snapshot taken
-// right before it ran. Only works when that roll is still the very last thing that
-// happened - if anything else occurred since (another roll, a chicken-out), reverting could
-// silently orphan a score that was already paid out against the now-stale state, so it's
-// refused instead of guessed at.
-function undoLastRoll(room, hostId) {
-  if (hostId !== room.hostId) return { error: 'Only the host can undo a roll.' };
-
-  const lastIndex = room.events.length - 1;
-  const last = room.events[lastIndex];
-  let rollEvent = null;
-  let removeCount = 0;
-
-  if (last && last.type === 'bust') {
-    rollEvent = room.events[lastIndex - 1];
-    removeCount = 2;
-  } else if (last && last.type === 'roll') {
-    rollEvent = last;
-    removeCount = 1;
-  }
-
-  if (!rollEvent || rollEvent.type !== 'roll' || !rollEvent.payload.preState) {
-    return { error: "Can't undo - the last thing that happened wasn't a roll." };
-  }
-
-  restoreRoundState(room, rollEvent.payload.preState);
-  room.events.splice(lastIndex - removeCount + 1, removeCount);
-
-  logEvent(room, 'hostOverride', hostId, {
-    action: 'undoRoll',
-    targetPlayerId: rollEvent.playerId,
-    sum: rollEvent.payload.sum,
-    isDouble: rollEvent.payload.isDouble,
-  });
-
-  return { room };
-}
-
-// The race: every action is timestamped and processed strictly in arrival order (the
-// server's event loop is single-threaded and this handler never awaits mid-mutation), so
-// whichever message gets here first wins. A chicken-out request carries the round it was
-// issued against; if a bust already advanced the room to a new round by the time this is
-// processed, the request is stale and gets rejected instead of silently paying out against
-// the new round's fresh (empty) pot.
-// Looks back for the pot value a round ended with, so a chicken-out rejected purely on
-// timing (the round it targeted just ended) can still be reversed for its true value later,
-// even though the live pot has already reset to 0 for the round that followed it.
-function findPotFromRecentRoundEnd(room) {
-  for (let i = room.events.length - 1; i >= 0; i--) {
-    const e = room.events[i];
-    if (e.type === 'bust') return e.payload.potLost;
-    if (e.type === 'roundEnd') return e.payload.potAtEnd;
-  }
-  return 0;
-}
-
-function chickenOut(room, playerId, payload) {
-  if (room.status !== 'active') return { error: 'Game is not active.' };
-
-  // Pass-and-play's one shared device (the host's socket) can chicken out any active player,
-  // not just whoever's turn it is, so it names its target explicitly instead of relying on
-  // which socket asked - scoped to the host specifically, same reasoning as submitRoll above.
-  const isPassAndPlayHost = room.isPassAndPlay && playerId === room.hostId;
-  const targetPlayerId = isPassAndPlayHost && payload && payload.targetPlayerId
-    ? payload.targetPlayerId
-    : playerId;
-
-  const player = room.players.get(targetPlayerId);
-  if (!player) return { error: 'Player not found.' };
-  if (!player.activeThisRound) return { error: 'You have already chickened out this round.' };
-
-  const claimedRound = payload && payload.round;
-  if (claimedRound !== room.currentRound) {
-    logEvent(room, 'chickenOutRejected', targetPlayerId, {
-      claimedRound,
-      actualRound: room.currentRound,
-      potAtRejection: findPotFromRecentRoundEnd(room),
-    });
-    return { error: 'Too late — the round already ended.' };
-  }
-
-  const potWon = room.pot;
-  player.activeThisRound = false;
-  player.totalScore += potWon;
-
-  logEvent(room, 'chickenOut', targetPlayerId, { potWon, scoreAfter: player.totalScore, round: room.currentRound });
-
-  const wasCurrentTurn = room.turnOrder[room.turnIndex] === targetPlayerId;
-  const anyoneStillActive = room.turnOrder.some((id) => {
-    const p = room.players.get(id);
-    return p && p.activeThisRound;
-  });
-
-  if (!anyoneStillActive) {
-    logEvent(room, 'roundEnd', playerId, { reason: 'allChickenedOut', round: room.currentRound, potAtEnd: room.pot });
-    startNewRound(room, room.turnOrder.length - 1);
-  } else if (wasCurrentTurn) {
-    room.turnIndex = nextActiveIndex(room, room.turnIndex);
-  }
-
-  return { room };
-}
-
-// Toggles a past chicken-out ruling: an accepted one gets its score clawed back (and the
-// player reactivated, if that round is still the current one); a rejected one gets paid out
-// for what the pot was worth when it should have landed. Calling this again on the same
-// ruling flips it right back - a "redo" for when the host reverses the wrong person - by
-// applying the exact inverse of whichever half just ran.
-//
-// This is also the fix for the physical-dice race where a player peeks at a bust coming and
-// taps Chicken Out before the roller can enter the 7: the host can't stop that in the
-// moment, but can claw the score back after the fact once they realize what happened.
-function reverseChickenOut(room, hostId, eventId) {
-  if (hostId !== room.hostId) return { error: 'Only the host can do that.' };
-
-  const event = room.events.find((e) => e.id === eventId);
-  if (!event) return { error: 'Event not found.' };
-  if (event.type !== 'chickenOut' && event.type !== 'chickenOutRejected') {
-    return { error: 'That event is not a chicken-out ruling.' };
-  }
-
-  const player = room.players.get(event.playerId);
-  if (!player) return { error: 'Player not found.' };
-
-  const nowReversed = !event.reversed;
-  const sign = nowReversed ? 1 : -1; // +1 applying the reversal, -1 undoing it (redo)
-
-  let amount = 0;
-  let direction;
-
-  if (event.type === 'chickenOut') {
-    amount = event.payload.potWon;
-    player.totalScore -= sign * amount;
-    direction = nowReversed ? 'toRejected' : 'toAccepted';
-    if (room.status === 'active' && event.payload.round === room.currentRound) {
-      player.activeThisRound = nowReversed;
-    }
-  } else {
-    amount = typeof event.payload.potAtRejection === 'number' ? event.payload.potAtRejection : 0;
-    player.totalScore += sign * amount;
-    direction = nowReversed ? 'toAccepted' : 'toRejected';
-  }
-
-  event.reversed = nowReversed;
-  logEvent(room, 'hostOverride', hostId, {
-    action: 'reverseChickenOut',
-    direction,
-    targetPlayerId: event.playerId,
-    amount,
-  });
-
-  return { room };
+function undoLastAction(room, hostId) {
+  const mode = getMode(room.gameMode);
+  return mode.undoLast(room, hostId);
 }
 
 function kickPlayer(room, hostId, targetPlayerId) {
@@ -489,6 +179,7 @@ function kickPlayer(room, hostId, targetPlayerId) {
   const player = room.players.get(targetPlayerId);
   if (!player) return { error: 'Player not found.' };
 
+  const mode = getMode(room.gameMode);
   const currentPlayerId = room.turnOrder[room.turnIndex];
   const wasCurrentTurn = room.status === 'active' && currentPlayerId === targetPlayerId;
 
@@ -502,12 +193,12 @@ function kickPlayer(room, hostId, targetPlayerId) {
       const n = room.turnOrder.length;
       // Removing an element shifts everything after it back one slot, so the old numeric
       // index now naturally lands on whoever was next in line - reuse it as the new turn
-      // unless they're inactive, in which case keep searching forward from there.
+      // unless the mode considers them ineligible, in which case keep searching forward.
       const candidateIndex = room.turnIndex % n;
       const candidate = room.players.get(room.turnOrder[candidateIndex]);
-      room.turnIndex = candidate && candidate.activeThisRound
+      room.turnIndex = (candidate && candidate.activeThisRound)
         ? candidateIndex
-        : nextActiveIndex(room, (candidateIndex - 1 + n) % n);
+        : mode.nextIndexFrom(room, (candidateIndex - 1 + n) % n);
     } else {
       room.turnIndex = room.turnOrder.indexOf(currentPlayerId);
     }
@@ -524,36 +215,31 @@ function startNewSession(room, hostId) {
   if (hostId !== room.hostId) return { error: 'Only the host can start a new session.' };
   if (room.status !== 'finished') return { error: 'The current game has not finished yet.' };
 
+  const mode = getMode(room.gameMode);
   room.status = 'lobby';
-  room.currentRound = 0;
-  room.rollCountThisRound = 0;
-  room.pot = 0;
   room.turnIndex = 0;
-  for (const p of room.players.values()) {
-    p.totalScore = 0;
-    p.activeThisRound = true;
-  }
   room.events = [];
+  mode.resetForNewSession(room);
 
   return { room };
 }
 
-// Lets the host tweak rounds/starting rolls/dice mode/confirm-rolls for players who are
-// sticking around for another game, without having to recreate the room from scratch.
-function updateSettings(room, hostId, { rounds, startingRolls, diceMode, confirmRolls }) {
+// Lets the host tweak this mode's config knobs (plus shared dice-input settings) for players
+// who are sticking around for another game, without recreating the room from scratch.
+function updateSettings(room, hostId, { diceMode, confirmRolls, ...rawConfig }) {
   if (hostId !== room.hostId) return { error: 'Only the host can change settings.' };
   if (room.status !== 'lobby') return { error: 'Settings can only be changed in the lobby.' };
 
-  room.roundsTotal = clampInt(rounds, 5, 35, room.roundsTotal);
-  room.startingRolls = clampInt(startingRolls, 1, 5, room.startingRolls);
+  const mode = getMode(room.gameMode);
   room.diceMode = diceMode === 'virtual' ? 'virtual' : 'physical';
   room.confirmRolls = !!confirmRolls;
+  room.config = mode.clampConfig(rawConfig, room.config);
 
   return { room };
 }
 
 // Ends the session right now, whatever round it's on, and shows the leaderboard as it
-// stands - the same screen a game reaching its configured round count lands on.
+// stands - the same screen a game reaching its natural end lands on.
 function endGame(room, hostId) {
   if (hostId !== room.hostId) return { error: 'Only the host can end the game.' };
   if (room.status !== 'active') return { error: 'Game is not active.' };
@@ -586,18 +272,16 @@ function getRoomSnapshot(room) {
   return {
     code: room.code,
     hostId: room.hostId,
-    roundsTotal: room.roundsTotal,
-    startingRolls: room.startingRolls,
+    gameMode: room.gameMode,
     diceMode: room.diceMode,
     confirmRolls: room.confirmRolls,
     isPassAndPlay: room.isPassAndPlay,
+    config: room.config,
     status: room.status,
     endedEarly: room.endedEarly,
-    currentRound: room.currentRound,
-    rollCountThisRound: room.rollCountThisRound,
-    pot: room.pot,
     turnOrder: room.turnOrder,
     turnIndex: room.turnIndex,
+    ...room.modeState,
     players: room.turnOrder
       .map((id) => room.players.get(id))
       .filter(Boolean)
@@ -605,12 +289,12 @@ function getRoomSnapshot(room) {
         id: p.id,
         name: p.name,
         isHost: p.isHost,
-        totalScore: p.totalScore,
         activeThisRound: p.activeThisRound,
         connected: p.connected,
+        ...p.modeState,
       })),
     events: room.events.slice(-50).map((e) => {
-      if (e.type !== 'roll' || !e.payload.preState) return e;
+      if (!e.payload || !e.payload.preState) return e;
       const { preState, ...rest } = e.payload;
       return { ...e, payload: rest };
     }),
@@ -625,10 +309,8 @@ module.exports = {
   rejoinRoom,
   reorderTurnOrder,
   startGame,
-  submitRoll,
-  chickenOut,
-  undoLastRoll,
-  reverseChickenOut,
+  performAction,
+  undoLastAction,
   kickPlayer,
   startNewSession,
   updateSettings,

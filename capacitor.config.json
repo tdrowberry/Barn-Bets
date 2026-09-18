@@ -1,6 +1,6 @@
 {
-  "appId": "com.tdrowberry.chickenout",
-  "appName": "Chicken Out",
+  "appId": "com.tdrowberry.barnbets",
+  "appName": "Barn Bets",
   "webDir": "public",
   "server": {
     "url": "https://chicken-out.onrender.com",

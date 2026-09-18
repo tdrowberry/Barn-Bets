@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Chicken Out</string>
-    <string name="title_activity_main">Chicken Out</string>
-    <string name="package_name">com.tdrowberry.chickenout</string>
-    <string name="custom_url_scheme">com.tdrowberry.chickenout</string>
+    <string name="app_name">Barn Bets</string>
+    <string name="title_activity_main">Barn Bets</string>
+    <string name="package_name">com.tdrowberry.barnbets</string>
+    <string name="custom_url_scheme">com.tdrowberry.barnbets</string>
 </resources>
