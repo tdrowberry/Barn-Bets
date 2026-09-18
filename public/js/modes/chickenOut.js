@@ -270,6 +270,10 @@
     name: 'Chicken Out',
     icon: '🐔',
     tagline: 'Push your luck on a shared pot',
+    // The only mode with real mascot art so far - other modes fall back to their emoji
+    // icon and the plain gradient background until their own art is ready.
+    logoImage: '/img/logo.jpg',
+    heroBackground: '/img/splash.jpg',
     howToPlay: [
       '<strong>Take turns rolling</strong> two dice (or tap Roll Dice in virtual mode). Every roll adds to the shared pot.',
       'The first few rolls each round are <strong>safe</strong> — even a 7 just adds a bonus 70 to the pot.',

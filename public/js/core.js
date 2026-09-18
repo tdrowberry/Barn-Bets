@@ -95,10 +95,31 @@ window.BarnBets = (function () {
 
   function showScreen(id) {
     screens.forEach((s) => el(s).classList.toggle('hidden', s !== id));
-    document.body.classList.toggle('bg-hero', HERO_BG_SCREENS.has(id));
     // Being back on the hub means no game is chosen yet - without this, How to Play would
     // keep showing whichever mode was last played instead of the game-picker overview.
     if (id === 'screen-hub') state.selectedMode = null;
+    updateHeaderChrome(id);
+  }
+
+  // The header's logo icon and the pre-game hero background are only ever art for a
+  // specific mode (so far, only Chicken Out has any) - shown while that mode is selected,
+  // hidden/plain everywhere else until each mode gets its own art.
+  function updateHeaderChrome(screenId) {
+    const mode = currentMode();
+
+    el('app-tagline').textContent = mode ? mode.name : 'Pick a game, place your bets';
+
+    const logo = el('app-logo-icon');
+    if (mode && mode.logoImage) {
+      logo.src = mode.logoImage;
+      logo.classList.remove('hidden');
+    } else {
+      logo.classList.add('hidden');
+    }
+
+    const heroImage = mode && mode.heroBackground;
+    document.body.style.setProperty('--hero-bg-image', heroImage ? `url('${heroImage}')` : 'none');
+    document.body.classList.toggle('bg-hero', HERO_BG_SCREENS.has(screenId) && !!heroImage);
   }
 
   function escapeHtml(str) {
@@ -182,7 +203,10 @@ window.BarnBets = (function () {
       const card = document.createElement('div');
       card.className = 'game-card';
       card.dataset.mode = key;
-      card.innerHTML = `<span class="game-card-icon">${mode.icon}</span>`
+      const iconHtml = mode.logoImage
+        ? `<img class="game-card-icon-img" src="${mode.logoImage}" alt="">`
+        : `<span class="game-card-icon">${mode.icon}</span>`;
+      card.innerHTML = iconHtml
         + `<span class="game-card-name">${escapeHtml(mode.name)}</span>`
         + `<span class="game-card-tagline">${escapeHtml(mode.tagline)}</span>`;
       card.addEventListener('click', () => selectMode(key));

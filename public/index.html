@@ -15,7 +15,10 @@
 </head>
 <body>
 <div id="splash-screen" class="hidden">
-  <img src="/img/splash.jpg" alt="Barn Bets - a party pack of dice games">
+  <div class="splash-text">
+    <span class="splash-title">Barn Bets</span>
+    <span class="splash-tagline">Pick a game, place your bets</span>
+  </div>
 </div>
 
 <div id="how-to-play-modal" class="modal hidden">
@@ -30,8 +33,8 @@
 <div id="app">
   <header class="app-header">
     <button id="btn-how-to-play" class="how-to-play-btn" type="button">❓ How to Play</button>
-    <h1><img class="logo-icon" src="/img/logo.jpg" alt="">Barn Bets</h1>
-    <p class="app-tagline">Pick a game, place your bets</p>
+    <h1><img id="app-logo-icon" class="logo-icon hidden" src="" alt="">Barn Bets</h1>
+    <p class="app-tagline" id="app-tagline">Pick a game, place your bets</p>
   </header>
 
   <section id="screen-hub" class="screen">

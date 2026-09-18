@@ -45,7 +45,7 @@ body {
 body.bg-hero {
   background-image:
     linear-gradient(rgba(7, 32, 22, 0.6), rgba(7, 32, 22, 0.8)),
-    url('/img/splash.jpg');
+    var(--hero-bg-image, none);
   background-size: cover;
   background-position: center;
   background-attachment: fixed;
@@ -75,10 +75,27 @@ body.bg-hero {
   pointer-events: none;
 }
 
-#splash-screen img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
+.splash-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.splash-title {
+  font-family: 'Fredoka', 'Nunito', sans-serif;
+  font-weight: 700;
+  font-size: 3rem;
+  color: var(--gold);
+  text-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+}
+
+.splash-tagline {
+  color: var(--on-dark-muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
 }
 
 .modal {
@@ -947,6 +964,14 @@ button {
 .game-card:active { transform: translateY(1px) scale(0.98); }
 
 .game-card-icon { font-size: 2.4rem; line-height: 1; }
+
+.game-card-icon-img {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
 
 .game-card-name {
   font-family: 'Fredoka', 'Nunito', sans-serif;
