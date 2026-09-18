@@ -7,13 +7,15 @@
   let dicePicker = null;
   let lastSlotsSignature = null;
 
-  // Recreated (back to all-1s) whenever the room's event history moves forward, not just
-  // when the reroll count changes - so a fresh roll never inherits the previous roll's
-  // leftover tapped values.
+  // Recreated (back to unanswered) whenever the room's event history moves forward, not
+  // just when the reroll count changes - so a fresh roll never inherits the previous roll's
+  // leftover taps.
   function ensureDiceSlots(n, signature) {
     if (lastSlotsSignature === signature && dicePicker) return;
     lastSlotsSignature = signature;
-    dicePicker = B.createDiceSlotPicker(B.el('horse-dice-slots'), n);
+    dicePicker = B.createDiceFacePicker(B.el('horse-dice-slots'), n, () => {
+      B.el('btn-horse-submit-roll').disabled = !dicePicker.isComplete();
+    });
   }
 
   function isLocked(player, pos) {
@@ -110,7 +112,7 @@
     });
 
     B.el('btn-horse-submit-roll').addEventListener('click', () => {
-      if (!dicePicker) return;
+      if (!dicePicker || !dicePicker.isComplete()) return;
       const room = B.state.room;
       const { turnPlayer } = activePlayerAndTurn(room, B.state);
       if (!turnPlayer) return;
@@ -179,7 +181,7 @@
     const unlockedCount = [0, 1, 2, 3, 4].filter((i) => !isLocked(turnPlayer, i)).length;
     const canRoll = isMyTurn && rollsLeft && unlockedCount > 0;
     el('btn-horse-roll').disabled = !canRoll;
-    el('btn-horse-submit-roll').disabled = !canRoll;
+    el('btn-horse-submit-roll').disabled = !canRoll || !(dicePicker && dicePicker.isComplete());
 
     if (room.diceMode === 'physical' && canRoll) {
       const n = Math.max(1, unlockedRerollPositions(turnPlayer).length);
@@ -213,6 +215,8 @@
     name: 'Horse Race',
     icon: '🐎',
     tagline: 'Three rolls, build your hand',
+    logoImage: '/img/horserace-logo.jpg',
+    heroBackground: '/img/horserace-hero.jpg',
     howToPlay: [
       'Five dice, <strong>3 rolls</strong> per turn — no open-ended pushing your luck here.',
       'Lock in a <strong>6 (Ship)</strong>, then a <strong>5 (Captain)</strong>, then a <strong>4 (Crew)</strong>, strictly in that order.',

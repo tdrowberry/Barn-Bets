@@ -7,13 +7,15 @@
   let dicePicker = null;
   let lastSlotsSignature = null;
 
-  // Recreated (back to all-1s) whenever the room's event history moves forward, not just
-  // when the dice count changes - so a fresh roll never inherits the previous roll's
-  // leftover tapped values.
+  // Recreated (back to unanswered) whenever the room's event history moves forward, not
+  // just when the dice count changes - so a fresh roll never inherits the previous roll's
+  // leftover taps.
   function ensureDiceSlots(n, signature) {
     if (lastSlotsSignature === signature && dicePicker) return;
     lastSlotsSignature = signature;
-    dicePicker = B.createDiceSlotPicker(B.el('quack-dice-slots'), n);
+    dicePicker = B.createDiceFacePicker(B.el('quack-dice-slots'), n, () => {
+      B.el('btn-quack-submit-roll').disabled = !dicePicker.isComplete();
+    });
   }
 
   function refreshVisibility(prefix) {
@@ -59,7 +61,7 @@
     });
 
     B.el('btn-quack-submit-roll').addEventListener('click', () => {
-      if (!dicePicker) return;
+      if (!dicePicker || !dicePicker.isComplete()) return;
       const values = dicePicker.getValues();
       B.socket.emit('player:quackReportRoll', { values }, (res) => {
         if (!res || !res.ok) { B.showToast((res && res.error) || 'Could not submit roll.', true); return; }
@@ -155,7 +157,7 @@
     }
 
     el('btn-quack-roll').disabled = !isMyTurn || hasCurrentRoll;
-    el('btn-quack-submit-roll').disabled = !isMyTurn || hasCurrentRoll;
+    el('btn-quack-submit-roll').disabled = !isMyTurn || hasCurrentRoll || !(dicePicker && dicePicker.isComplete());
     el('btn-quack-confirm-selection').disabled = selectedIndices.size === 0;
     el('btn-quack-bank').disabled = !isMyTurn || hasCurrentRoll || !(turnPlayer && turnPlayer.turnTotal > 0);
   }
@@ -189,6 +191,8 @@
     name: 'Quack Quack',
     icon: '🦆',
     tagline: 'Six dice, score the combo',
+    logoImage: '/img/quackquack-logo.jpg',
+    heroBackground: '/img/quackquack-hero.jpg',
     howToPlay: [
       'Roll all 6 dice, then <strong>set aside</strong> at least one scoring die or combo each roll.',
       'Singles: a <strong>1</strong> is worth 100, a <strong>5</strong> is worth 50. Three or more of a kind score much more.',

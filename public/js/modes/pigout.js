@@ -8,13 +8,15 @@
   let dicePicker = null;
   let lastSlotsSignature = null;
 
-  // Recreates the picker (back to all-1s) whenever the room's event history moves forward -
-  // i.e. after every roll or turn change - not just when the dice count changes, so a new
-  // roll never silently inherits the previous roll's leftover tapped values.
+  // Recreates the picker (back to unanswered) whenever the room's event history moves
+  // forward - i.e. after every roll or turn change - not just when the dice count changes,
+  // so a new roll never silently inherits the previous roll's leftover taps.
   function ensureDiceSlots(n, signature) {
     if (lastSlotsSignature === signature && dicePicker) return;
     lastSlotsSignature = signature;
-    dicePicker = B.createDiceSlotPicker(B.el('pig-dice-slots'), n);
+    dicePicker = B.createDiceFacePicker(B.el('pig-dice-slots'), n, () => {
+      B.el('btn-pig-submit-roll').disabled = !dicePicker.isComplete();
+    });
   }
 
   function refreshVisibility(prefix) {
@@ -61,7 +63,7 @@
     });
 
     B.el('btn-pig-submit-roll').addEventListener('click', () => {
-      if (!dicePicker) return;
+      if (!dicePicker || !dicePicker.isComplete()) return;
       const faces = dicePicker.getValues();
       const payload = B.state.room.config.hogModeEnabled ? { faces, diceCount: faces.length } : { faces };
       B.socket.emit('player:pigReportRoll', payload, (res) => {
@@ -142,7 +144,7 @@
     }
 
     el('btn-pig-roll').disabled = !isMyTurn;
-    el('btn-pig-submit-roll').disabled = !isMyTurn;
+    el('btn-pig-submit-roll').disabled = !isMyTurn || !(dicePicker && dicePicker.isComplete());
     el('btn-pig-bank').disabled = !isMyTurn || !(turnPlayer && turnPlayer.hasRolledThisTurn);
   }
 
@@ -169,9 +171,11 @@
 
   window.BarnBetsModes.pigout = {
     key: 'pigout',
-    name: 'Pigout',
+    name: 'Pig Out',
     icon: '🐷',
     tagline: 'Roll, bank, don’t get greedy',
+    logoImage: '/img/pigout-logo.jpg',
+    heroBackground: '/img/pigout-hero.jpg',
     howToPlay: [
       '<strong>Roll</strong> and add each roll to your <strong>turn total</strong>.',
       'Roll a <strong>1</strong> and your turn total is lost — turn passes to the next player.',

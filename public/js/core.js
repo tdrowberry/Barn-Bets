@@ -101,25 +101,21 @@ window.BarnBets = (function () {
     updateHeaderChrome(id);
   }
 
-  // The header's logo icon and the pre-game hero background are only ever art for a
-  // specific mode (so far, only Chicken Out has any) - shown while that mode is selected,
-  // hidden/plain everywhere else until each mode gets its own art.
+  const BARN_BETS_LOGO = '/img/barnbets-logo.jpg';
+  const BARN_BETS_HERO = '/img/barnbets-hero.jpg';
+
+  // The header's logo icon and the pre-game hero background show the selected mode's own
+  // art once it has any; on the hub (or any mode that hasn't gotten its own art yet) they
+  // fall back to the overall Barn Bets logo/background.
   function updateHeaderChrome(screenId) {
     const mode = currentMode();
 
     el('app-tagline').textContent = mode ? mode.name : 'Pick a game, place your bets';
+    el('app-logo-icon').src = (mode && mode.logoImage) || BARN_BETS_LOGO;
 
-    const logo = el('app-logo-icon');
-    if (mode && mode.logoImage) {
-      logo.src = mode.logoImage;
-      logo.classList.remove('hidden');
-    } else {
-      logo.classList.add('hidden');
-    }
-
-    const heroImage = mode && mode.heroBackground;
-    document.body.style.setProperty('--hero-bg-image', heroImage ? `url('${heroImage}')` : 'none');
-    document.body.classList.toggle('bg-hero', HERO_BG_SCREENS.has(screenId) && !!heroImage);
+    const heroImage = (mode && mode.heroBackground) || BARN_BETS_HERO;
+    document.body.style.setProperty('--hero-bg-image', `url('${heroImage}')`);
+    document.body.classList.toggle('bg-hero', HERO_BG_SCREENS.has(screenId));
   }
 
   function escapeHtml(str) {
@@ -227,7 +223,7 @@ window.BarnBets = (function () {
 
   const HUB_OVERVIEW = [
     '<strong>Chicken Out</strong> — push your luck on a shared pot with the whole table.',
-    '<strong>Pigout</strong> — your own running score, bust on your own turn only.',
+    '<strong>Pig Out</strong> — your own running score, bust on your own turn only.',
     '<strong>Quack Quack</strong> — six dice, a scoring puzzle, and hot dice streaks.',
     '<strong>Horse Race</strong> — three rolls to build Ship, Captain, Crew, then cargo.',
     'Pick a game from the list, then Host, Join, or play One Phone.',
@@ -659,23 +655,44 @@ window.BarnBets = (function () {
     clearSession();
   }
 
-  // --- Small reusable widget: N-slot tap-to-cycle (1-6) physical dice entry ---
+  // --- Small reusable widget: N dice-face grids (1-6), same tap-the-number-you-rolled
+  // pattern as Chicken Out's own sum grid, just one grid per physical die instead of one
+  // grid for a combined sum. `onChange()` fires after every tap so the caller can re-check
+  // completeness (e.g. to enable a Submit button) without waiting for a room:update.
 
-  function createDiceSlotPicker(containerEl, count) {
-    const values = new Array(count).fill(1);
+  function createDiceFacePicker(containerEl, count, onChange) {
+    const values = new Array(count).fill(null);
     containerEl.innerHTML = '';
     for (let i = 0; i < count; i++) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'dice-slot-btn';
-      btn.textContent = '1';
-      btn.addEventListener('click', () => {
-        values[i] = (values[i] % 6) + 1;
-        btn.textContent = String(values[i]);
-      });
-      containerEl.appendChild(btn);
+      const row = document.createElement('div');
+      row.className = 'die-face-row';
+
+      const label = document.createElement('span');
+      label.className = 'die-face-label';
+      label.textContent = count > 1 ? `Die ${i + 1}` : 'Die';
+      row.appendChild(label);
+
+      const grid = document.createElement('div');
+      grid.className = 'die-face-grid';
+      for (let face = 1; face <= 6; face++) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'die-face-btn';
+        btn.textContent = String(face);
+        btn.addEventListener('click', () => {
+          values[i] = face;
+          [...grid.children].forEach((b) => b.classList.toggle('selected', b === btn));
+          if (onChange) onChange();
+        });
+        grid.appendChild(btn);
+      }
+      row.appendChild(grid);
+      containerEl.appendChild(row);
     }
-    return { getValues: () => values.slice() };
+    return {
+      getValues: () => values.slice(),
+      isComplete: () => values.every((v) => v !== null),
+    };
   }
 
   // --- Wiring: hub, mode-landing, host-setup, join ---
@@ -952,7 +969,7 @@ window.BarnBets = (function () {
     arm,
     disarm,
     wireConfirmButton,
-    createDiceSlotPicker,
+    createDiceFacePicker,
     refreshGameChrome,
     init,
   };
