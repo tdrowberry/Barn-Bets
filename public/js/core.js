@@ -62,9 +62,15 @@ window.BarnBets = (function () {
     armedAction = null;
   }
 
+  // 3s was easy to miss on a real tap (read the "Confirm?" label, hesitate, tap again just
+  // a beat too late) - the button would then silently re-arm instead of firing, which reads
+  // as "this button doesn't work" rather than "you were a little slow." 6s gives real thumbs
+  // enough room without leaving a destructive action armed indefinitely.
+  const CONFIRM_WINDOW_MS = 6000;
+
   function arm(type, id, onExpire) {
     disarm();
-    const timer = setTimeout(() => { armedAction = null; onExpire(); }, 3000);
+    const timer = setTimeout(() => { armedAction = null; onExpire(); }, CONFIRM_WINDOW_MS);
     armedAction = { type, id, timer };
   }
 
@@ -80,7 +86,7 @@ window.BarnBets = (function () {
           confirming = false;
           btn.classList.remove('confirming');
           btn.textContent = defaultLabel;
-        }, 3000);
+        }, CONFIRM_WINDOW_MS);
         return;
       }
       clearTimeout(timer);
@@ -514,6 +520,9 @@ window.BarnBets = (function () {
     el('host-room-code').textContent = room.code;
     el('host-join-link').value = joinUrl;
     el('btn-undo-roll').disabled = room.events.length === 0;
+    // Ending an already-finished game makes no sense and only invites confused re-clicks -
+    // grey it out once the room has moved on to the New Session / Close Room screen.
+    el('btn-end-game').disabled = room.status !== 'active';
 
     const ul = el('host-player-list');
     ul.innerHTML = '';
@@ -579,9 +588,9 @@ window.BarnBets = (function () {
     el('btn-close-room').classList.toggle('hidden', !state.isHost);
     el('new-session-waiting-msg').classList.toggle('hidden', state.isHost);
     el('event-log-wrap').classList.add('hidden');
-    el('host-controls').classList.toggle('hidden', !state.isHost);
 
     renderScoreboard(room);
+    renderHostControls(room);
   }
 
   // --- Top-level render dispatch ---
